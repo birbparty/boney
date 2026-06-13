@@ -52,12 +52,25 @@ bd close <id>         # Complete work
 
 ## Build & Test
 
-_Add your build and test commands here_
+`boney` is a library (no `bin` key) — **`nimble build` errors by design**.
+Use these gates instead:
 
 ```bash
-# Example:
-# npm install
-# npm test
+# Validate package and dependency graph
+nimble check
+
+# Compile-check the entry module (what the editor LSP runs per-file)
+nim check src/dragonbones.nim
+
+# Run tests (once tests/ is populated)
+nimble test
+
+# ARM cross-compile parity check (no SDK needed)
+nim check --os:linux --cpu:arm --mm:arc --define:useMalloc --opt:size src/dragonbones.nim
+
+# Console cross-compile (SDK required — optional CI gate)
+# scripts/build_3ds.sh   # requires devkitARM
+# scripts/build_vita.sh  # requires VitaSDK
 ```
 
 ## Architecture Overview
