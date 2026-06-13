@@ -1,4 +1,3 @@
-node:1: command not found: _load_nvm
 {
   "version": "1",
   "asset": "tests/fixtures/sample/dragon_ske.json",

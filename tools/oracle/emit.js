@@ -27,7 +27,11 @@ const ASSET_PATH = arg('--asset',
   path.resolve(__dirname, '../../tests/fixtures/sample/dragon_ske.json'));
 const ARMATURE_NAME = arg('--armature', 'Dragon');
 const ANIMATION_NAME = arg('--animation', 'idle');
-const FRAMES = (arg('--frames', '0,6,12,18,24')).split(',').map(Number);
+const FRAMES = arg('--frames', '0,6,12,18,24').split(',').map(s => {
+  const n = Number(s);
+  if (!Number.isFinite(n)) { console.error(`invalid frame value: "${s}"`); process.exit(1); }
+  return n;
+});
 
 // ── Transform math ────────────────────────────────────────────────────────────
 
@@ -96,26 +100,31 @@ function buildKeyframes(timeline) {
 // Interpolate a single scalar field across keyframes at the given frame.
 function interpolateField(keyframes, frame, field) {
   if (!keyframes || keyframes.length === 0) return 0;
+  // Clamp before first keyframe to first value.
+  if (frame <= keyframes[0].startFrame) return keyframes[0][field] ?? 0;
 
   for (let i = 0; i < keyframes.length - 1; i++) {
     const kA = keyframes[i];
     const kB = keyframes[i + 1];
-    if (frame >= kA.startFrame && frame <= kA.endFrame) {
+    // Half-open interval: frame in [kA.startFrame, kA.endFrame).
+    // Frames at the boundary fall into the next segment (or the fallthrough).
+    if (frame >= kA.startFrame && frame < kA.endFrame) {
       const span = kA.endFrame - kA.startFrame;
-      const vA   = kA[field] || 0;
-      const vB   = kB[field] || 0;
+      const vA   = kA[field] ?? 0;
+      // Hold previous value when next keyframe omits the field; don't snap to 0.
+      const vB   = kB[field] !== undefined ? kB[field] : vA;
       if (span <= 0 || kA.tweenEasing === undefined || kA.tweenEasing === null) {
-        // Step tween (no interpolation)
         return vA;
       }
-      // Linear tween (tweenEasing: 0 = linear)
+      if (kA.tweenEasing !== 0) {
+        throw new Error(`unsupported tweenEasing=${kA.tweenEasing} on field "${field}"; only linear (0) supported`);
+      }
       const t = (frame - kA.startFrame) / span;
-      // Bezier curve support would go here; for now only linear (easing=0) is used.
       return vA + t * (vB - vA);
     }
   }
-  // Past the last keyframe — clamp to last value
-  return (keyframes[keyframes.length - 1][field]) || 0;
+  // At or past the last keyframe — clamp to last value.
+  return keyframes[keyframes.length - 1][field] ?? 0;
 }
 
 // ── Animation sampling ────────────────────────────────────────────────────────
@@ -139,8 +148,8 @@ function localAtFrame(boneDefault, boneAnim, frame) {
   const defT = boneDefault.transform || {};
   const baseX    = defT.x   || 0;
   const baseY    = defT.y   || 0;
-  const baseSkX  = defT.skX || 0;
-  const baseSkY  = defT.skY !== undefined ? defT.skY : baseSkX;
+  // baseSkX/baseSkY reserved for future skew support; rotate keyframes are absolute
+  // per DragonBones 5.x spec (unlike translate/scale which are bind-pose deltas).
   const baseScX  = defT.scX !== undefined ? defT.scX : 1;
   const baseScY  = defT.scY !== undefined ? defT.scY : 1;
 
@@ -180,12 +189,28 @@ for (const b of (animDef.bone || [])) animBoneMap[b.name] = b;
 // DragonBones bone arrays are already in topological order.
 const bones = armDef.bone;
 
+// Guard: verify topological ordering so a child-before-parent fixture fails loudly.
+{
+  const seen = new Set();
+  for (const bone of bones) {
+    if (bone.parent && !seen.has(bone.parent)) {
+      console.error(`bone "${bone.name}" precedes parent "${bone.parent}" — bones must be topologically ordered`);
+      process.exit(1);
+    }
+    seen.add(bone.name);
+  }
+}
+
 // Sample each requested frame.
 const samples = FRAMES.map(frame => {
   // World matrices: computed root → leaf.
   const worldMatrices = {};
 
   for (const bone of bones) {
+    if (bone.parent && !worldMatrices[bone.parent]) {
+      console.error(`bone "${bone.name}" references parent "${bone.parent}" not yet computed`);
+      process.exit(1);
+    }
     const parentMatrix = bone.parent ? worldMatrices[bone.parent] : IDENTITY;
     const local        = localAtFrame(bone, animBoneMap[bone.name], frame);
     worldMatrices[bone.name] = multiply(parentMatrix, local);
@@ -197,7 +222,7 @@ const samples = FRAMES.map(frame => {
     boneTransforms[bone.name] = fromMatrix(worldMatrices[bone.name]);
   }
 
-  return { frame, time: frame / (armDef.frameRate || raw.frameRate), bones: boneTransforms };
+  return { frame, time: frame / (armDef.frameRate || raw.frameRate || 24), bones: boneTransforms };
 });
 
 const output = {

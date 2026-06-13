@@ -12,7 +12,10 @@ The output (`expected.json`) is the golden reference for `boney-dnc` tests.
 
 ```sh
 # Re-generate expected.json (only needed when the sample or oracle changes):
-node emit.js > expected.json
+# Note: use 2>/dev/null to prevent any shell wrapper noise from polluting the JSON.
+node emit.js 2>/dev/null > expected.json
+# Verify the output is valid JSON before committing:
+node -e "JSON.parse(require('fs').readFileSync('expected.json','utf8')); console.log('expected.json OK')"
 
 # Custom sample/animation:
 node emit.js \
