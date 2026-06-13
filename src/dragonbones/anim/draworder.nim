@@ -22,19 +22,22 @@ import std/algorithm
 import dragonbones/model/model
 
 proc sampleDrawOrder*(kfs: seq[ZOrderKeyframe], frame: float32, numSlots: int,
-                      output: var seq[int]) =
+                      output: var seq[int], zVals: var seq[int]) =
   ## Sample the zOrder timeline at `frame` and write the draw-order permutation
   ## to `output`.
   ##
   ## output must have len == numSlots; caller allocates once and reuses.
   ## output[i] = the slot index to render at layer i (layer 0 = backmost).
   ##
-  ## Allocation budget: zero heap allocations per call when zVals scratch is
-  ## not needed (empty kfs or empty slotOffsets). One allocation the first time
-  ## zVals is built; caller cannot pre-supply it, so this proc allocates on the
-  ## first zOrder-active frame and the GC reclaims it after (ARC: immediately).
-  ## For the common case — most frames have no active zOrder keyframe — this is
-  ## allocation-free.
+  ## zVals is a caller-managed scratch buffer; auto-grown via setLen when too
+  ## small. Pre-size to the maximum slot count and pass the same buffer across
+  ## all frames for zero heap allocations per frame. Matches the convention used
+  ## by propagateWorldTransforms (scratch) and sampleFFDOffsets (output).
+  ##
+  ## Precondition: kfs must be sorted ascending by base.frame (guaranteed by the
+  ## DragonBones parser via accumulated-duration encoding).
+  ##
+  ## Allocation budget: zero per frame when output and zVals are pre-sized.
   doAssert output.len == numSlots,
     "output must be parallel to armData.slots (got " & $output.len &
     ", need " & $numSlots & ")"
@@ -56,13 +59,16 @@ proc sampleDrawOrder*(kfs: seq[ZOrderKeyframe], frame: float32, numSlots: int,
   if kf.slotOffsets.len == 0: return
 
   # Build per-slot effective z-value: default = slot index.
-  var zVals = newSeq[int](numSlots)
+  if zVals.len < numSlots: zVals.setLen(numSlots)
   for i in 0 ..< numSlots: zVals[i] = i
   for so in kf.slotOffsets:
     if so.slotIndex >= 0 and so.slotIndex < numSlots:
       zVals[so.slotIndex] = so.slotIndex + so.zOffset
 
   # Sort slot indices by effective z-value; ties broken by slot index (stable).
-  output.sort(proc(a, b: int): int =
-    let d = zVals[a] - zVals[b]
-    if d != 0: d else: a - b)
+  # Capture via ptr to work around Nim's var-capture restriction under ARC.
+  if numSlots > 0:
+    let zdata = cast[ptr UncheckedArray[int]](addr zVals[0])
+    output.sort(proc(a, b: int): int =
+      let d = cmp(zdata[a], zdata[b])
+      if d != 0: d else: cmp(a, b))
