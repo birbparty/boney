@@ -8,6 +8,7 @@ import jsony
 import bumpy
 import dragonbones/model/model
 import dragonbones/parse/slot
+import dragonbones/parse/timeline
 
 # ── Wire types (private, mirror DragonBones JSON structure) ───────────────────
 
@@ -75,6 +76,7 @@ type
     slot: seq[RawSlot]
     skin: seq[RawSkin]
     ik: seq[RawIK]
+    animation: seq[RawAnimation]  ## populated by timeline.nim
     ## isGlobal (DragonBones 4.x armature flag) is intentionally ignored;
     ## 5.x files omit it and use per-bone inherit* flags instead.
 
@@ -169,7 +171,7 @@ proc toArmatureData(r: RawArmature, topFrameRate: int): ArmatureData =
                bones: r.bone.mapIt(it.toBoneData()),
                slots: r.slot.mapIt(it.toSlotData()),
                skins: parseSkins(r.skin),
-               animations: @[],   ## populated by boney-56w
+               animations: parseAnimations(r.animation),
                ikConstraints: r.ik.mapIt(it.toIKConstraintData()),
                defaultActions: @[])
 
