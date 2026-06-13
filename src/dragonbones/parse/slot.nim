@@ -10,6 +10,9 @@ import dragonbones/model/model
 
 # ── Private helpers ────────────────────────────────────────────────────────────
 
+const BonePoseStride = 7
+## Floats per bonePose entry: [globalBoneIdx, a, b, c, d, tx, ty].
+
 type
   ## Exported so that armature.nim can call fromJson(RawFile) without a
   ## 'type not accessible' error — SlotRawTransform is nested inside
@@ -33,6 +36,11 @@ proc toDbTransform(r: Option[SlotRawTransform]): DbTransform =
 type
   ## Flat raw display item: one struct covers all display types since jsony
   ## requires concrete types. Discriminate on `displayType` during conversion.
+  ## Fields are only meaningful for the indicated displayType:
+  ##   image/armature: name, transform
+  ##   mesh:           name, transform, width, height, vertices, uvs, triangles,
+  ##                   weights, bonePose
+  ##   boundingBox:    name, transform, width, height, vertices (polygon), subType
   RawDisplayItem* = object
     displayType*: string               ## JSON "type" renamed via renameHook
     name*: string
@@ -43,7 +51,7 @@ type
     ## Mesh vertex data (flat float pairs: x0,y0,x1,y1,...)
     vertices*: seq[float32]
     uvs*: seq[float32]                 ## normalized 0–1 flat pairs
-    triangles*: seq[int]               ## triangle index list
+    triangles*: seq[int]               ## triangle indices; values must fit uint16 (< 65536)
     ## Skinned-mesh weight data (packed: count,boneLocalIdx,w,boneLocalIdx,w,...)
     weights*: seq[float32]
     ## Bone pose matrices: [globalBoneIdx, a, b, c, d, tx, ty, ...] per bone
@@ -77,9 +85,12 @@ proc parseVertexWeights(weights: seq[float32], bonePose: seq[float32],
                         vertexCount: int): seq[seq[VertexWeight]] =
   ## Unpack DragonBones packed weight array into per-vertex VertexWeight lists.
   ## weights[] encoding per vertex: [numInfluences, localIdx, w, localIdx, w, ...]
-  ## bonePose[] encoding: [globalBoneIdx, a, b, c, d, tx, ty, ...] (7 floats each)
+  ## bonePose[] encoding: [globalBoneIdx, a, b, c, d, tx, ty, ...] (BonePoseStride floats)
+  ## The affine columns (a,b,c,d,tx,ty) encode the bind-pose matrix; only globalBoneIdx
+  ## is extracted here — bind-pose matrix resolution happens in the skeleton/pose layer.
   ## Returns empty seq for non-skinned meshes (weights.len == 0).
   if weights.len == 0: return @[]
+  let boneCount = bonePose.len div BonePoseStride
   result = newSeq[seq[VertexWeight]](vertexCount)
   var i = 0
   for v in 0 ..< vertexCount:
@@ -87,21 +98,26 @@ proc parseVertexWeights(weights: seq[float32], bonePose: seq[float32],
     let count = int(weights[i])
     inc i
     result[v] = newSeq[VertexWeight](count)
-    for j in 0 ..< count:
+    var written = 0
+    for _ in 0 ..< count:
       if i + 1 >= weights.len: break
       let localIdx = int(weights[i])
       let w = weights[i + 1]
       inc i, 2
-      ## globalBoneIdx is the 0-based index into ArmatureData.bones
-      let globalIdx = uint16(int(bonePose[localIdx * 7]))
-      result[v][j] = VertexWeight(boneIndex: globalIdx, weight: w)
+      if localIdx < 0 or localIdx >= boneCount:
+        ## Malformed weight stream: drop this influence rather than panic.
+        continue
+      let globalIdx = uint16(int(bonePose[localIdx * BonePoseStride]))
+      result[v][written] = VertexWeight(boneIndex: globalIdx, weight: w)
+      inc written
+    result[v].setLen(written)
 
 proc toBoundingBoxVerts(d: RawDisplayItem, shape: BoundingBoxShape): seq[Vec2] =
   case shape
   of bbsPolygon:
     d.vertices.pairsToVec2()
   of bbsRectangle:
-    ## 4 corners in CCW order from center; hit-test uses these for AABB.
+    ## 4 corner points at (±w/2, ±h/2); hit-test code uses these as extents.
     let w2 = d.width / 2.0'f32
     let h2 = d.height / 2.0'f32
     @[vec2(-w2, -h2), vec2(w2, -h2), vec2(w2, h2), vec2(-w2, h2)]
@@ -124,8 +140,14 @@ proc toDisplayData(d: RawDisplayItem): DisplayData =
   of dkMesh:
     let verts = d.vertices.pairsToVec2()
     let uvs = d.uvs.pairsToVec2()
+    ## Triangle indices must fit uint16; values outside 0..65535 are a malformed asset.
     let indices = d.triangles.mapIt(uint16(it))
-    let wts = parseVertexWeights(d.weights, d.bonePose, verts.len)
+    ## For weighted meshes, vertex positions may be absent (geometry comes from bones).
+    ## Use UV count as the authoritative vertex count when weights are present.
+    let vertexCount =
+      if d.weights.len > 0 and uvs.len > 0: uvs.len
+      else: verts.len
+    let wts = parseVertexWeights(d.weights, d.bonePose, vertexCount)
     DisplayData(name: d.name, transform: transform, kind: dkMesh,
                 mesh: MeshData(width: d.width, height: d.height,
                                vertices: verts, uvs: uvs, indices: indices,

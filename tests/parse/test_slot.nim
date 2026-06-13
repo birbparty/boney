@@ -188,6 +188,40 @@ suite "slot/skin parser — mesh display":
     check wts[1][1].boneIndex == 7'u16
     check wts[1][1].weight    == 0.5'f32
 
+  test "weighted mesh with empty vertices uses UV count for vertexCount":
+    ## Real DragonBones weighted meshes may omit vertex positions (geometry
+    ## comes from bone transforms). Vertex count must come from UVs, not vertices.
+    let d = oneSkin(oneSlot(
+      """[{"type":"mesh","name":"m","width":0,"height":0,
+          "vertices":[],
+          "uvs":[0,0,1,0],
+          "triangles":[0,1,0],
+          "weights":[1,0,1.0, 1,0,0.8],
+          "bonePose":[5,1,0,0,1,0,0]}]"""
+    )).arm().skins[0].slots[0].displays[0]
+    ## vertexCount should be 2 (from uvs.len div 2), not 0 (from vertices.len div 2)
+    check d.mesh.vertexWeights.len == 2
+    check d.mesh.vertexWeights[0][0].boneIndex == 5'u16
+    check d.mesh.vertexWeights[0][0].weight    == 1.0'f32
+    check d.mesh.vertexWeights[1][0].boneIndex == 5'u16
+    check d.mesh.vertexWeights[1][0].weight    == 0.8'f32
+
+  test "out-of-range localIdx in bonePose is silently dropped (no IndexDefect)":
+    ## localIdx=99 is out of bounds for a bonePose with 1 entry (index 0 only).
+    ## The malformed influence must be dropped, not panic.
+    let d = oneSkin(oneSlot(
+      """[{"type":"mesh","name":"m","width":0,"height":0,
+          "vertices":[0,0],
+          "uvs":[0,0],
+          "triangles":[0,0,0],
+          "weights":[2, 0,0.5, 99,0.5],
+          "bonePose":[1,1,0,0,1,0,0]}]"""
+    )).arm().skins[0].slots[0].displays[0]
+    ## localIdx=0 is valid (global bone 1, w=0.5); localIdx=99 is invalid and dropped.
+    check d.mesh.vertexWeights[0].len == 1
+    check d.mesh.vertexWeights[0][0].boneIndex == 1'u16
+    check d.mesh.vertexWeights[0][0].weight    == 0.5'f32
+
 # ── Armature display ───────────────────────────────────────────────────────────
 
 suite "slot/skin parser — armature display":
