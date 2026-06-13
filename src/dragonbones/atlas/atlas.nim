@@ -60,12 +60,12 @@ type
     ## Pixel offset of the visible region within the original frame
     ## (typically negative: frameX=−5 means 5 px trimmed from the left).
     frameX*, frameY*: int
+    ## Raw atlas sub-rectangle in pixels (the actual region in the texture atlas).
+    ## For rotated sprites, atlasW/atlasH are swapped relative to the displayed
+    ## sprite dimensions. Use this with DrawTexturePro's source parameter.
+    atlasX*, atlasY*, atlasW*, atlasH*: int
     ## 4-corner sprite quad in sprite-local space and atlas UV space.
     ## Ordered: TL, TR, BR, BL (clockwise). UVs already account for rotation.
-    ##
-    ## NOTE: DrawQuad.dstQuad (boundary.nim) uses the OPPOSITE winding:
-    ## counter-clockwise TL, BL, BR, TR. Apply permutation [0,3,2,1] when
-    ## copying quadVerts/quadUVs into dstQuad to avoid a silent winding flip.
     quadVerts*: array[4, Vec2]
     quadUVs*:   array[4, Vec2]
 
@@ -122,6 +122,8 @@ proc buildSubTexture(raw: RawSubTexture, atlasW, atlasH: float32): AtlasSubTextu
     rotated:     rotated,
     frameWidth:  fW, frameHeight: fH,
     frameX:      fX, frameY:      fY,
+    atlasX:      round(px).int, atlasY: round(py).int,
+    atlasW:      round(pw).int, atlasH: round(ph).int,
     quadVerts:   [vTL, vTR, vBR, vBL],
     quadUVs:     [uvTL, uvTR, uvBR, uvBL])
 

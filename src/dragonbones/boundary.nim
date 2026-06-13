@@ -22,13 +22,22 @@ proc isValid*(h: TextureHandle): bool = h != NullTextureHandle
 
 type
   ## Draw command for an image slot or a mesh slot degraded to a bounding quad.
-  ## dstQuad corners are in world space, counter-clockwise: TL, BL, BR, TR.
-  ## NOTE: srcRect is in PIXELS (atlas pixel coordinates).
-  ##       DrawMesh.uvs are normalized 0-1. Adapters must not double-normalize.
+  ##
+  ## Corner order: TL, TR, BR, BL (clockwise, matching AtlasSubTexture.quadVerts).
+  ## Triangle decomposition: (0,1,2) and (0,2,3).
+  ##
+  ## srcRect: raw atlas pixel sub-rectangle for DrawTexturePro (console path).
+  ## uvQuad:  normalized UVs matching dstQuad corners — use for rlVertex (desktop).
+  ##          Already accounts for atlas sprite rotation.
+  ## atlasRotated: true when the sprite is stored 90° CW in the atlas; the
+  ##          console DrawTexturePro path must add 90° to the dest rotation to
+  ##          compensate (or avoid rotated atlases on console targets).
   DrawQuad* = object
-    texture*: TextureHandle
-    srcRect*: Rect                ## atlas sub-rectangle in PIXELS
-    dstQuad*: array[4, Vec2]      ## world-space corners
+    texture*:      TextureHandle
+    srcRect*:      Rect             ## atlas sub-rectangle in PIXELS
+    uvQuad*:       array[4, Vec2]   ## normalized UV coords, order matches dstQuad
+    dstQuad*:      array[4, Vec2]   ## world-space corners: TL, TR, BR, BL
+    atlasRotated*: bool             ## true → sprite is 90° CW in atlas
     color*: DbColor
     blendMode*: BlendMode
 

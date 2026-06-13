@@ -58,6 +58,7 @@ jobs:
             src/dragonbones/anim/propagate.nim \
             src/dragonbones/anim/mesh.nim \
             src/dragonbones/anim/draworder.nim \
+            src/dragonbones/anim/emit.nim \
             src/dragonbones/parse/armature.nim \
             src/dragonbones/atlas/atlas.nim \
             src/dragonbones/boundary.nim; do
