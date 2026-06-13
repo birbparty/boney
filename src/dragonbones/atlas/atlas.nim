@@ -17,6 +17,7 @@
 ##     visible content occupies [−frameX, −frameX+visW] × [−frameY, −frameY+visH]
 
 import std/options
+import std/math
 import vmath
 import jsony
 
@@ -60,8 +61,11 @@ type
     ## (typically negative: frameX=−5 means 5 px trimmed from the left).
     frameX*, frameY*: int
     ## 4-corner sprite quad in sprite-local space and atlas UV space.
-    ## Ordered: TL, TR, BR, BL. UVs already account for rotation so the
-    ## renderer can use them directly without further de-rotation logic.
+    ## Ordered: TL, TR, BR, BL (clockwise). UVs already account for rotation.
+    ##
+    ## NOTE: DrawQuad.dstQuad (boundary.nim) uses the OPPOSITE winding:
+    ## counter-clockwise TL, BL, BR, TR. Apply permutation [0,3,2,1] when
+    ## copying quadVerts/quadUVs into dstQuad to avoid a silent winding flip.
     quadVerts*: array[4, Vec2]
     quadUVs*:   array[4, Vec2]
 
@@ -86,10 +90,11 @@ proc buildSubTexture(raw: RawSubTexture, atlasW, atlasH: float32): AtlasSubTextu
   let visH = if rotated: pw else: ph
 
   ## Frame dimensions: provided by JSON or fall back to visible size (no trim).
-  let fW = if raw.frameWidth  > 0: int(raw.frameWidth)  else: int(visW)
-  let fH = if raw.frameHeight > 0: int(raw.frameHeight) else: int(visH)
-  let fX = int(raw.frameX)   ## typically ≤ 0; −fX = left trim amount
-  let fY = int(raw.frameY)   ## typically ≤ 0; −fY = top trim amount
+  ## round() instead of int() guards against sub-pixel frame offsets in scaled exports.
+  let fW = if raw.frameWidth  > 0: round(raw.frameWidth).int  else: round(visW).int
+  let fH = if raw.frameHeight > 0: round(raw.frameHeight).int else: round(visH).int
+  let fX = round(raw.frameX).int   ## typically ≤ 0; −fX = left trim amount
+  let fY = round(raw.frameY).int   ## typically ≤ 0; −fY = top trim amount
 
   ## Normalized UV coords of the subtexture region in the atlas.
   let u0 = px / atlasW;          let v0 = py / atlasH
@@ -134,5 +139,5 @@ proc parseAtlas*(json: string): AtlasData =
   for s in raw.subTexture:
     subs.add buildSubTexture(s, aW, aH)
   AtlasData(name: raw.name, imagePath: raw.imagePath,
-            width: int(aW), height: int(aH),
+            width: round(aW).int, height: round(aH).int,
             scale: scale, subTextures: subs)
