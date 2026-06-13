@@ -153,15 +153,21 @@ proc violations(path: string): seq[string] =
         result.add m
 
 # Build the set of files to check. Core dirs only (adapters import their
-# backends by design and are excluded). Also scan the top-level aggregator.
+# backends by design and are excluded). Also scan the top-level aggregator
+# and any .nim files placed directly in src/dragonbones/ (e.g. boundary.nim).
 let coreBase = (currentSourcePath().parentDir / ".." / "src" / "dragonbones").normalizedPath
 doAssert dirExists(coreBase), "core source dir not found: " & coreBase
 
 var coreFiles: seq[string]
-# Top-level public aggregator
+# Top-level public aggregator (src/dragonbones.nim)
 let topLevel = (coreBase / ".." / "dragonbones.nim").normalizedPath
 if fileExists(topLevel):
   coreFiles.add topLevel
+# Flat .nim files directly in src/dragonbones/ (e.g. boundary.nim).
+# adapters/ is excluded — those files intentionally import renderer backends.
+for kind, path in walkDir(coreBase):
+  if kind == pcFile and path.endsWith(".nim"):
+    coreFiles.add path
 # Core subsystem directories only (excludes adapters/)
 for sub in coreModules:
   let subDir = coreBase / sub
