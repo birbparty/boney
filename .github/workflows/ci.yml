@@ -16,12 +16,13 @@ permissions:
   contents: read
 
 # ── Primary invariant gate ────────────────────────────────────────────────────
-# Runs fast, requires no SDK, and is checked before the full test suite starts.
+# Runs fast, requires no SDK, and completes before the full test suite starts.
 # Required status check: this job must pass before merging.
 jobs:
   invariants:
     name: Invariants (purity + ARM compile)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
       - uses: actions/checkout@v4
@@ -36,8 +37,8 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.nimble
-          key: nimble-ubuntu-2.2.x-${{ hashFiles('boney.nimble') }}
-          restore-keys: nimble-ubuntu-2.2.x-
+          key: nimble-Linux-2.2.x-${{ hashFiles('boney.nimble') }}
+          restore-keys: nimble-Linux-2.2.x-
 
       - name: Install dependencies
         run: nimble install -y --depsOnly
@@ -48,10 +49,15 @@ jobs:
 
       - name: SDK-free ARM compile check
         # nim.cfg provides --mm:arc --define:useMalloc; only cross-compile flags added here.
-        # Catches ARM-specific issues (alignment, ABI, mm:arc edge cases) without devkitARM.
+        # Checks all core modules (not just those reachable from one import root).
         run: |
           for module in \
+            src/dragonbones/model/model.nim \
             src/dragonbones/anim/sample.nim \
+            src/dragonbones/anim/transform.nim \
+            src/dragonbones/anim/propagate.nim \
+            src/dragonbones/anim/mesh.nim \
+            src/dragonbones/anim/draworder.nim \
             src/dragonbones/parse/armature.nim \
             src/dragonbones/atlas/atlas.nim \
             src/dragonbones/boundary.nim; do
@@ -59,10 +65,13 @@ jobs:
           done
 
 # ── Full test suite ───────────────────────────────────────────────────────────
-# Matrix across OS and Nim versions. Required status check.
+# Runs after `invariants` passes. Matrix across OS and Nim versions.
+# Required status check.
   test:
     name: Tests (Nim ${{ matrix.nim }}, ${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    needs: [invariants]
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -93,12 +102,15 @@ jobs:
         run: nimble test
 
 # ── Optional console gates (SDK-gated; never block a merge) ──────────────────
-# These run only when the corresponding repository secret is configured.
-# Configure via Settings → Secrets and variables → Actions (repository secrets).
+# Enabled by setting repository variables (Settings → Variables → Actions):
+#   ENABLE_CONSOLE_3DS=true   and secret DEVKITPRO / DEVKITARM
+#   ENABLE_CONSOLE_VITA=true  and secret VITASDK
+# vars.* is available in job if: conditions; secrets.* is not.
   console-3ds:
     name: Console — Nintendo 3DS
     runs-on: ubuntu-latest
-    if: ${{ secrets.DEVKITPRO != '' }}
+    if: ${{ vars.ENABLE_CONSOLE_3DS == 'true' }}
+    timeout-minutes: 30
     env:
       DEVKITPRO: ${{ secrets.DEVKITPRO }}
       DEVKITARM: ${{ secrets.DEVKITARM }}
@@ -109,6 +121,12 @@ jobs:
         with:
           nim-version: "2.2.x"
           repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Cache Nimble packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nimble
+          key: nimble-Linux-2.2.x-${{ hashFiles('boney.nimble') }}
+          restore-keys: nimble-Linux-2.2.x-
       - name: Install dependencies
         run: nimble install -y --depsOnly
       - name: 3DS compile check
@@ -117,7 +135,8 @@ jobs:
   console-vita:
     name: Console — Sony PS Vita
     runs-on: ubuntu-latest
-    if: ${{ secrets.VITASDK != '' }}
+    if: ${{ vars.ENABLE_CONSOLE_VITA == 'true' }}
+    timeout-minutes: 30
     env:
       VITASDK: ${{ secrets.VITASDK }}
     steps:
@@ -127,6 +146,12 @@ jobs:
         with:
           nim-version: "2.2.x"
           repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Cache Nimble packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nimble
+          key: nimble-Linux-2.2.x-${{ hashFiles('boney.nimble') }}
+          restore-keys: nimble-Linux-2.2.x-
       - name: Install dependencies
         run: nimble install -y --depsOnly
       - name: Vita compile check
