@@ -1,6 +1,6 @@
 # jsony Console Cross-Compile Spike — boney-782
 
-**Outcome: A — jsony is approved. Add to parse module dependency and purity allowlist.**
+**Outcome: A — jsony is approved. Add to core module purity allowlist and boney.nimble dependency.**
 
 ---
 
@@ -26,6 +26,8 @@ nim check --os:linux --cpu:arm --mm:arc --define:useMalloc --define:vita --opt:s
 
 ## Results
 
+(`SuccessX` is Nim's `[SuccessX]` hint — the actual output of a passing `nim check`.)
+
 | Target | Result | Lines processed | Peak mem |
 |---|---|---|---|
 | Host (macOS/amd64) | ✅ SuccessX | 53 878 | 74 MiB |
@@ -48,7 +50,7 @@ under ARC — the allocation model change is transparent.
 
 ## Decision
 
-**Outcome A.** jsony is allowed for use in boney's core parse module.
+**Outcome A.** jsony is allowed for use in all boney core modules (model, parse, atlas, anim). The primary consumer is the parse module, but the allowlist is per-project, not per-module.
 
 Updated in this commit:
 - `tests/test_core_purity.nim` — jsony added to `isAllowed`; the
@@ -57,8 +59,11 @@ Updated in this commit:
 
 ## Version pin
 
-**jsony 1.1.6** is the version tested and approved. If jsony is upgraded, the
-cross-compile spike should be re-run before landing the bump.
+**jsony 1.1.6** is the version tested and approved. The nimble constraint
+`>= 1.1.6` follows standard Nimble practice (floor, not exact pin). If jsony is
+upgraded to a new minor or major version, re-run the cross-compile spike before
+landing the bump — patch bumps on a pure-Nim lib are low-risk but worth
+checking on major changes.
 
 ## What this does NOT prove
 
