@@ -20,3 +20,4 @@ task test, "Run the test suite":
   exec "nim r tests/test_core_purity.nim"
   exec "nim r tests/parse/test_armature.nim"
   exec "nim r tests/parse/test_slot.nim"
+  exec "nim r tests/parse/test_timeline.nim"

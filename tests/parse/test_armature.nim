@@ -296,7 +296,7 @@ suite "armature parser — multiple armatures":
     check data.armatures[1].name == "Enemy"
     check data.armatures[1].frameRate == 30
 
-  test "skins empty for armature with no skin array; animations pending boney-56w":
+  test "skins empty for armature with no skin array; animations empty when absent":
     let data = oneArmature().parseDragonBones()
     check data.armatures[0].skins.len == 0
     check data.armatures[0].animations.len == 0
