@@ -1,4 +1,5 @@
 import std/unittest
+import jsony
 import dragonbones/model/model
 import dragonbones/parse/armature
 
@@ -59,6 +60,12 @@ suite "armature parser — armature":
     ## frameRate absent → 0 from jsony → caller falls back to file-level 24.
     let json = minimalFile(
       """[{"type":"Armature","name":"A","bone":[],"slot":[],"ik":[]}]""")
+    check json.parseDragonBones().armatures[0].frameRate == 24
+
+  test "frameRate explicit 0 treated same as absent (inherits top-level)":
+    ## Intentional: frameRate 0 is nonsensical; the > 0 guard clamps it to absent.
+    let json = minimalFile(
+      """[{"type":"Armature","name":"A","frameRate":0,"bone":[],"slot":[],"ik":[]}]""")
     check json.parseDragonBones().armatures[0].frameRate == 24
 
   test "armature frameRate overrides top-level":
@@ -183,6 +190,11 @@ suite "armature parser — slots":
     let json = oneArmature(slots = """[{"name":"s","parent":"b"}]""")
     check json.parseDragonBones().armatures[0].slots[0].displayIndex == 0
 
+  test "slot displayIndex explicit -1 (DisplayIndexHidden) is preserved":
+    ## Absent → 0 (show display 0) and explicit -1 (hidden) must remain distinct.
+    let json = oneArmature(slots = """[{"name":"s","parent":"b","displayIndex":-1}]""")
+    check json.parseDragonBones().armatures[0].slots[0].displayIndex == DisplayIndexHidden
+
   test "slot blendMode normal":
     let json = oneArmature(slots = """[{"name":"s","parent":"b","blendMode":"normal"}]""")
     check json.parseDragonBones().armatures[0].slots[0].blendMode == bmNormal
@@ -193,6 +205,11 @@ suite "armature parser — slots":
 
   test "slot blendMode absent defaults to normal":
     let json = oneArmature(slots = """[{"name":"s","parent":"b"}]""")
+    check json.parseDragonBones().armatures[0].slots[0].blendMode == bmNormal
+
+  test "slot blendMode unknown string degrades to normal (lenient)":
+    ## Unknown/future blend modes degrade gracefully rather than erroring.
+    let json = oneArmature(slots = """[{"name":"s","parent":"b","blendMode":"multiply_x2"}]""")
     check json.parseDragonBones().armatures[0].slots[0].blendMode == bmNormal
 
   test "slot color identity when absent":
@@ -283,3 +300,15 @@ suite "armature parser — multiple armatures":
     let data = oneArmature().parseDragonBones()
     check data.armatures[0].skins.len == 0
     check data.armatures[0].animations.len == 0
+
+# ── Error handling ─────────────────────────────────────────────────────────────
+
+suite "armature parser — error handling":
+
+  test "malformed JSON raises JsonError":
+    expect JsonError:
+      discard "{".parseDragonBones()
+
+  test "empty string raises JsonError":
+    expect JsonError:
+      discard "".parseDragonBones()

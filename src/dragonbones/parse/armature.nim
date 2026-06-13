@@ -28,6 +28,8 @@ type
   RawColor = object
     ## Multipliers 0–100 in JSON; model range is 0–1 (divided by 100 on parse).
     ## Offsets –255..255 in JSON and model.
+    ## Multipliers are Option (absent identity is 100/1.0, not Nim's 0 zero-default);
+    ## offsets are plain float32 because their identity (0.0) equals the zero-default.
     aM: Option[float32]
     rM: Option[float32]
     gM: Option[float32]
@@ -50,7 +52,7 @@ type
   RawSlot = object
     name: string
     parent: string                ## JSON "parent" → SlotData.boneName
-    displayIndex: int             ## absent → 0
+    displayIndex: int  ## absent → 0 (show display 0); explicit -1 (DisplayIndexHidden) = hidden
     blendMode: Option[string]     ## absent → "normal"
     color: Option[RawColor]       ## absent → identity color
 
@@ -83,7 +85,7 @@ type
 
 # ── jsony hooks ────────────────────────────────────────────────────────────────
 
-proc renameHook*(v: var RawArmature, fieldName: var string) =
+proc renameHook(v: var RawArmature, fieldName: var string) =
   ## Map JSON "type" → "armatureType" to avoid the Nim keyword clash.
   if fieldName == "type": fieldName = "armatureType"
 
@@ -101,10 +103,8 @@ proc toRect(r: RawAabb): Rect =
 proc toDbColor(c: Option[RawColor]): DbColor =
   if c.isNone: return dbColorIdentity()
   let r = c.get()
-  DbColor(aM: r.aM.get(100.0'f32) / 100.0'f32,
-          rM: r.rM.get(100.0'f32) / 100.0'f32,
-          gM: r.gM.get(100.0'f32) / 100.0'f32,
-          bM: r.bM.get(100.0'f32) / 100.0'f32,
+  template pct(o: Option[float32]): float32 = o.get(100.0'f32) / 100.0'f32
+  DbColor(aM: r.aM.pct, rM: r.rM.pct, gM: r.gM.pct, bM: r.bM.pct,
           aO: r.aO, rO: r.rO, gO: r.gO, bO: r.bO)
 
 proc toBlendMode(s: Option[string]): BlendMode =
@@ -121,13 +121,13 @@ proc toBlendMode(s: Option[string]): BlendMode =
   of "hard_light": bmHardLight
   of "dodge":      bmDodge
   of "burn":       bmBurn
-  else:            bmNormal
+  else:            bmNormal  ## lenient: unknown/future blend modes degrade to Normal
 
 proc toArmatureKind(s: string): ArmatureKind =
   case s
   of "MovieClip": akMovieClip
   of "Stage":     akStage
-  else:           akArmature
+  else:           akArmature  ## lenient: absent or unknown type defaults to Armature
 
 proc toBoneData(r: RawBone): BoneData =
   BoneData(name: r.name,
@@ -157,11 +157,13 @@ proc toIKConstraintData(r: RawIK): IKConstraintData =
 
 proc toArmatureData(r: RawArmature, topFrameRate: int): ArmatureData =
   ## frameRate: armature's own value takes priority; falls back to file-level.
+  ## `> 0` intentionally clamps 0/negative to "absent" — frameRate 0 is nonsensical
+  ## and treated identically to an omitted field.
   let fr = if r.frameRate > 0: r.frameRate else: topFrameRate
   ArmatureData(name: r.name,
                kind: r.armatureType.toArmatureKind(),
                frameRate: fr,
-               aabb: (if r.aabb.isSome: r.aabb.get().toRect() else: Rect()),
+               aabb: (if r.aabb.isSome: r.aabb.get().toRect() else: Rect()),  ## zero Rect = no aabb
                bones: r.bone.mapIt(it.toBoneData()),
                slots: r.slot.mapIt(it.toSlotData()),
                skins: @[],        ## populated by boney-706
@@ -173,7 +175,8 @@ proc toArmatureData(r: RawArmature, topFrameRate: int): ArmatureData =
 
 proc parseDragonBones*(json: string): DragonBonesData =
   ## Parse a DragonBones 5.5–5.7 _ske.json string into DragonBonesData.
-  ## Skins (boney-706) and animation timelines (boney-56w) are not yet populated.
+  ## Raises jsony.JsonError on malformed JSON. Skins (boney-706) and animation
+  ## timelines (boney-56w) are not yet populated.
   let raw = json.fromJson(RawFile)
   DragonBonesData(version: raw.version,
                   compatibleVersion: raw.compatibleVersion,
