@@ -267,3 +267,91 @@ suite "applyIKConstraints — worldMatrix updated":
     ## Col0.x = scX * cos(skY) ≈ 1 * cos(90°) ≈ 0.
     let m00 = bones[0].worldMatrix[0][0]  ## col-major: col0.x
     check abs(m00) < 0.1'f32              ## cos(90°) ≈ 0
+
+# ── Degenerate geometry guards ────────────────────────────────────────────────
+
+suite "applyIKConstraints — degenerate geometry guards":
+
+  test "one-bone IK: coincident target does not produce NaN":
+    ## End-effector and target at the same world position — no defined direction.
+    ## Solver must bail out and leave rotation at its rest value.
+    let bone_arr = @[mkBone("a", "", 0, 0, 100), mkBone("t", "", 0, 0, 0)]
+    let arm = mkArm(bone_arr, @[mkIK("ik", "a", "t", 0, 0)])
+    var (bones, slots, worldT) = setupPose(arm)
+    let origRot = bones[0].localTransform.skX
+    applyIKConstraints(emptyAnim(), arm, 0.0'f32, bones, worldT)
+    check classify(bones[0].localTransform.skX) notin {fcNan, fcInf, fcNegInf}
+    check abs(bones[0].localTransform.skX - origRot) < Eps
+
+  test "two-bone IK: zero-length parent bone does not produce NaN":
+    ## Upper limb length = 0 → law-of-cosines denominator is 0; must bail out.
+    let bone_arr = @[mkBone("shoulder", "", 0, 0, 0),   ## length = 0
+                     mkBone("elbow", "shoulder", 0, 0, 100),
+                     mkBone("target", "", 100, 100, 0)]
+    let arm = mkArm(bone_arr, @[mkIK("ik", "elbow", "target", 1, 0)])
+    var (bones, slots, worldT) = setupPose(arm)
+    let origSh = bones[0].localTransform.skX
+    let origEl = bones[1].localTransform.skX
+    applyIKConstraints(emptyAnim(), arm, 0.0'f32, bones, worldT)
+    check classify(bones[0].localTransform.skX) notin {fcNan, fcInf, fcNegInf}
+    check classify(bones[1].localTransform.skX) notin {fcNan, fcInf, fcNegInf}
+    check abs(bones[0].localTransform.skX - origSh) < Eps
+    check abs(bones[1].localTransform.skX - origEl) < Eps
+
+  test "two-bone IK: zero-length child bone does not produce NaN":
+    ## Lower limb length = 0 → degenerate triangle; must bail out.
+    let bone_arr = @[mkBone("shoulder", "", 0, 0, 100),
+                     mkBone("elbow", "shoulder", 100, 0, 0),   ## length = 0
+                     mkBone("target", "", 50, 50, 0)]
+    let arm = mkArm(bone_arr, @[mkIK("ik", "elbow", "target", 1, 0)])
+    var (bones, slots, worldT) = setupPose(arm)
+    let origSh = bones[0].localTransform.skX
+    let origEl = bones[1].localTransform.skX
+    applyIKConstraints(emptyAnim(), arm, 0.0'f32, bones, worldT)
+    check classify(bones[0].localTransform.skX) notin {fcNan, fcInf, fcNegInf}
+    check classify(bones[1].localTransform.skX) notin {fcNan, fcInf, fcNegInf}
+    check abs(bones[0].localTransform.skX - origSh) < Eps
+    check abs(bones[1].localTransform.skX - origEl) < Eps
+
+  test "two-bone IK: target coincident with parent origin does not produce NaN":
+    ## d = 0 → no direction vector; must bail out.
+    let bone_arr = @[mkBone("shoulder", "", 0, 0, 100),
+                     mkBone("elbow", "shoulder", 100, 0, 100),
+                     mkBone("target", "", 0, 0, 0)]  ## same pos as shoulder
+    let arm = mkArm(bone_arr, @[mkIK("ik", "elbow", "target", 1, 0)])
+    var (bones, slots, worldT) = setupPose(arm)
+    let origSh = bones[0].localTransform.skX
+    let origEl = bones[1].localTransform.skX
+    applyIKConstraints(emptyAnim(), arm, 0.0'f32, bones, worldT)
+    check classify(bones[0].localTransform.skX) notin {fcNan, fcInf, fcNegInf}
+    check classify(bones[1].localTransform.skX) notin {fcNan, fcInf, fcNegInf}
+    check abs(bones[0].localTransform.skX - origSh) < Eps
+    check abs(bones[1].localTransform.skX - origEl) < Eps
+
+# ── Weight clamping ───────────────────────────────────────────────────────────
+
+suite "applyIKConstraints — weight clamping":
+
+  test "weight > 1 is clamped to 1 (no overshoot)":
+    ## weight=2.0 must produce the same result as weight=1.0 (full IK rotation).
+    let bone_arr = @[mkBone("a", "", 0, 0, 100), mkBone("t", "", 0, 100, 0)]
+    let arm1 = mkArm(bone_arr, @[mkIK("ik", "a", "t", 0, 0, weight = 1.0'f32)])
+    let arm2 = mkArm(bone_arr, @[mkIK("ik", "a", "t", 0, 0, weight = 2.0'f32)])
+    var (b1, s1, w1) = setupPose(arm1)
+    var (b2, s2, w2) = setupPose(arm2)
+    applyIKConstraints(emptyAnim(), arm1, 0.0'f32, b1, w1)
+    applyIKConstraints(emptyAnim(), arm2, 0.0'f32, b2, w2)
+    check abs(w1[0].skX - w2[0].skX) < Eps
+
+# ── Unsupported chain lengths ─────────────────────────────────────────────────
+
+suite "applyIKConstraints — unsupported chain lengths":
+
+  test "chain=2 is skipped without mis-solving or crashing":
+    ## N-bone (chain >= 2) IK is unsupported; must be a clean no-op.
+    let bone_arr = @[mkBone("a", "", 0, 0, 100), mkBone("t", "", 0, 100, 0)]
+    let arm = mkArm(bone_arr, @[mkIK("ik", "a", "t", 2, 0)])
+    var (bones, slots, worldT) = setupPose(arm)
+    let origRot = bones[0].localTransform.skX
+    applyIKConstraints(emptyAnim(), arm, 0.0'f32, bones, worldT)
+    check abs(bones[0].localTransform.skX - origRot) < Eps
