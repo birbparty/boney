@@ -14,3 +14,6 @@ installExt    = @["nim"]  # source-only install; no compiled artifacts
 requires "nim >= 2.0.0"
 requires "vmath >= 2.0.0"
 requires "bumpy >= 1.1.0"
+
+task test, "Run the test suite":
+  exec "nim r tests/test_core_purity.nim"
