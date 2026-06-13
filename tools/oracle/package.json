@@ -1,0 +1,10 @@
+{
+  "name": "boney-oracle",
+  "version": "1.0.0",
+  "description": "DragonBones headless transform oracle for boney deterministic sampling tests",
+  "main": "emit.js",
+  "scripts": {
+    "emit": "node emit.js"
+  },
+  "engines": { "node": ">=18" }
+}
