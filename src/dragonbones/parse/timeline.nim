@@ -69,6 +69,9 @@ type
     duration*: int
     tweenEasing*: Option[float32]
     curve*: seq[float32]
+    ## DB exporters write bendPositive as 0/1 integers (not JSON booleans).
+    ## A boolean in JSON will cause jsony to raise JsonError for the whole parse.
+    ## Confirm with a golden 5.7 fixture (boney-93g) before accepting booleans.
     bendPositive*: Option[int]     ## absent → 1 (true)
     weight*: Option[float32]       ## absent → 1.0
 
@@ -108,9 +111,9 @@ type
 type
   RawAnimation* = object
     name*: string
-    duration*: int
-    playTimes*: int
-    fadeInTime*: Option[float32]
+    duration*: int              ## absent → 0 (jsony int default; 0-frame anim is degenerate)
+    playTimes*: int             ## absent → 0 (jsony int default; 0 = loop forever)
+    fadeInTime*: Option[float32]  ## absent → 0.0 via .get(0.0); Option because 0.0 is meaningful
     bone*: seq[RawBoneTimeline]
     slot*: seq[RawSlotTimeline]
     ffd*: seq[RawFFDTimeline]
@@ -209,6 +212,8 @@ proc toFFDTimelines(raws: seq[RawFFDTimeline]): seq[Timeline] =
     var kfs: seq[FFDKeyframe]
     var frame = 0
     for r in raw.frame:
+      assert r.vertices.len mod 2 == 0,
+        "FFD vertices must be even-length (x,y pairs); got " & $r.vertices.len
       var verts: seq[Vec2]
       var i = 0
       while i + 1 < r.vertices.len:
@@ -231,9 +236,11 @@ proc toZOrderTimeline(raw: RawZOrder): Timeline =
   var frame = 0
   for r in raw.frame:
     var offsets: seq[tuple[slotIndex: int, zOffset: int]]
+    assert r.zOrder.len mod 2 == 0,
+      "zOrder must be even-length (slotIndex,offset pairs); got " & $r.zOrder.len
     var i = 0
     while i + 1 < r.zOrder.len:
-      offsets.add((r.zOrder[i], r.zOrder[i + 1]))
+      offsets.add((slotIndex: r.zOrder[i], zOffset: r.zOrder[i + 1]))
       i += 2
     kfs.add(ZOrderKeyframe(
       base: KeyframeBase(frame: frame, duration: r.duration,

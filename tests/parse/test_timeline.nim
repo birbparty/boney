@@ -1,4 +1,4 @@
-import std/unittest
+import std/[unittest, os]
 import vmath
 import dragonbones/model/model
 import dragonbones/parse/armature
@@ -237,7 +237,9 @@ suite "timeline parser — tween curves":
     check curve.samples[0]  == 0.0'f32
     check curve.samples[5]  == 1.0'f32
 
-  test "curve overrides tweenEasing when both present":
+  test "curve takes precedence when both curve and tweenEasing present (defensive tie-break for malformed input)":
+    ## DB format says curve and tweenEasing are mutually exclusive; this tests the
+    ## parser's defensive behavior when a malformed keyframe has both.
     let boneJson = """[{"name":"b","rotateFrame":[
       {"duration":12,"tweenEasing":0.5,"curve":[0.1,0.2,0.8,0.9],"rotate":0}]}]"""
     let curve = oneAnim(anim0(bone = boneJson)).parseDragonBones()
@@ -463,3 +465,46 @@ suite "timeline parser — mixed timelines":
     check tlBoneRotate   in kinds
     check tlSlotDisplay  in kinds
     check tlIK           in kinds
+
+# ── Default field behavior ─────────────────────────────────────────────────────
+
+suite "timeline parser — field defaults":
+
+  test "duration and playTimes absent default to 0 (jsony int zero-default)":
+    ## Intentional: duration/playTimes are plain int, not Option. Both absent
+    ## fields yield 0 via jsony's zero-default for non-Option int fields.
+    let json = minimalFile(
+      """[{"type":"Armature","name":"A","frameRate":24,"bone":[],"slot":[],"ik":[],""" &
+      """"animation":[{"name":"noop","bone":[],"slot":[],"ffd":[],"ik":[]}]}]""")
+    let anim = json.parseDragonBones().armatures[0].animations[0]
+    check anim.duration  == 0
+    check anim.playTimes == 0
+
+# ── Integration: real fixture ──────────────────────────────────────────────────
+
+suite "timeline parser — fixture integration":
+
+  test "dragon_ske.json idle animation: root bone rotate 0→90 over 24 frames":
+    ## Loads the canonical bundled fixture and verifies the parsed animation matches
+    ## the expected structure. This closes the loop between synthetic JSON tests and
+    ## the real on-wire format.
+    let fixtureDir = currentSourcePath().parentDir() / ".." / "fixtures" / "sample"
+    let json = readFile(fixtureDir / "dragon_ske.json")
+    let data = json.parseDragonBones()
+    let arm = data.armatures[0]
+    check arm.animations.len == 1
+    let anim = arm.animations[0]
+    check anim.name      == "idle"
+    check anim.duration  == 24
+    check anim.playTimes == 0
+    ## The idle animation has one timeline: root bone rotateFrame.
+    check anim.timelines.len == 1
+    let tl = anim.timelines[0]
+    check tl.kind == tlBoneRotate
+    check tl.name == "root"
+    check tl.rotateKFs.len == 2
+    check tl.rotateKFs[0].base.frame    == 0
+    check tl.rotateKFs[0].rotate        == 0.0'f32
+    check tl.rotateKFs[0].base.curve.kind == tkLinear
+    check tl.rotateKFs[1].base.frame    == 24
+    check tl.rotateKFs[1].rotate        == 90.0'f32
