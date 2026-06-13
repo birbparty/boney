@@ -17,6 +17,9 @@ proc solveBezierY*(p1x, p1y, p2x, p2y, t: float32): float32 =
   ## Given a unit cubic Bezier with control points (p1x,p1y) and (p2x,p2y),
   ## solve for the y value at x=t using binary search on the x parametric.
   ## Control points are in [0,1]×[0,1]; endpoints are fixed at (0,0) and (1,1).
+  ## Precondition: p1x ∈ [0,1] and p2x ∈ [0,1] (x-monotonic). Non-monotonic
+  ## curves (p1x or p2x outside [0,1]) break the bisection silently and are not
+  ## supported. Validate at parse time if untrusted export sources are expected.
   var lo = 0.0'f32; var hi = 1.0'f32
   for _ in 0..<12:
     let mid = (lo + hi) * 0.5'f32
@@ -180,6 +183,13 @@ proc sampleAnimation*(animData: AnimationData, armData: ArmatureData,
   ## Slots are initialised from SlotData defaults before applying timeline
   ## overrides.  FFD, IK, and zOrder timelines are not handled here (separate
   ## subsystems: boney-o6v, boney-tm6, boney-qyh).
+
+  doAssert bones.len == armData.bones.len,
+    "bones seq must be parallel to armData.bones (got " & $bones.len &
+    ", need " & $armData.bones.len & ")"
+  doAssert slots.len == armData.slots.len,
+    "slots seq must be parallel to armData.slots (got " & $slots.len &
+    ", need " & $armData.slots.len & ")"
 
   # Initialise from rest pose
   for i in 0 ..< armData.bones.len:

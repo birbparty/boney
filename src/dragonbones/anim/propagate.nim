@@ -18,15 +18,15 @@ proc computeWorldTransform(local: DbTransform, boneData: BoneData,
   ## Apply BoneData inheritance flags to derive the world DbTransform from
   ## the parent's world DbTransform and the child's local DbTransform.
   ##
-  ## Inheritance semantics (matching DragonBones 5.x runtime):
-  ##   - rotation: world.skX/skY = parentWorld.skX/skY + local.skX/skY
-  ##   - scale: world.scX/scY = parentWorld.scX/scY * local.scX/scY
-  ##   - translation: world.x/y = parent_matrix * local.x/y + parent.x/y
+  ## Accumulation is intentionally in DbTransform space — additive angles,
+  ## multiplicative scales — matching DragonBones Bone._updateGlobalTransformMatrix.
+  ## This is NOT a true parent*child affine compose: under non-uniform parent scale
+  ## the 2×2 linear part diverges from a true matrix product. This matches DragonBones
+  ## reference output, so do not "fix" it to a matrix compose.
   ##
-  ## inheritReflection: prevents negative-scale "flips" from propagating.
-  ## When the parent has negative scale and inheritReflection is false, the
-  ## child's effective parent scale is treated as 1.0 for the scale component.
-  ## This is a known TODO for full correctness with reflected skeletons.
+  ## inheritReflection: not yet honoured (boney-xxx). When a parent has negative
+  ## scX or scY (reflected skeleton), the child incorrectly inherits the reflection.
+  ## Non-reflected skeletons are not affected.
 
   var w: DbTransform
 
@@ -84,8 +84,12 @@ proc propagateWorldTransforms*(armData: ArmatureData, bones: var seq[BoneState])
   ##
   ## Requires: bones.len == armData.bones.len and each bones[i].localTransform
   ## already set by sampleAnimation (or manually for static poses).
+  ## Requires: armData.bones are in parent-before-child order (DragonBones guarantee).
   ##
   ## After this call, bones[i].worldMatrix is ready for skinning / rendering.
+  doAssert bones.len == armData.bones.len,
+    "bones seq must be parallel to armData.bones (got " & $bones.len &
+    ", need " & $armData.bones.len & ")"
 
   # Accumulate world DbTransforms in a parallel array so children can reference
   # their parent's world components without matrix decomposition.
