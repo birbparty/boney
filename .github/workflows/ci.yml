@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "ralph/iteration-*"]
+  pull_request:
+    branches: [main]
+
+# Cancel superseded runs on the same ref (relevant for ralph iteration pushes).
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Test-only workflow — read access is sufficient.
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Tests (Nim ${{ matrix.nim }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        # Matrix lower bound matches `requires "nim >= 2.0.0"` in boney.nimble.
+        nim: ["2.2.x", "2.0.x"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Nim
+        uses: jiro4989/setup-nim-action@v2
+        with:
+          nim-version: ${{ matrix.nim }}
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cache Nimble packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nimble
+          key: nimble-${{ runner.os }}-${{ matrix.nim }}-${{ hashFiles('boney.nimble') }}
+          restore-keys: nimble-${{ runner.os }}-${{ matrix.nim }}-
+
+      - name: Install dependencies
+        run: nimble install -y --depsOnly
+
+      - name: Compile check (core subsystems, host triple)
+        run: |
+          nim check --hints:off src/dragonbones/anim/sample.nim
+          nim check --hints:off src/dragonbones/parse/armature.nim
+          nim check --hints:off src/dragonbones/atlas/atlas.nim
+          nim check --hints:off src/dragonbones/boundary.nim
+
+      - name: Compile check (ARM cross-compile, no SDK required)
+        # nim.cfg provides --mm:arc --define:useMalloc globally; only cross-compile flags added here.
+        run: |
+          nim check --hints:off --os:linux --cpu:arm --opt:size \
+            src/dragonbones/anim/sample.nim
+
+      - name: Run test suite
+        run: nimble test
