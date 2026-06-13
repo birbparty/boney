@@ -1,0 +1,11 @@
+{
+  "name": "boney-oracle",
+  "version": "1.0.0",
+  "description": "DragonBones headless transform oracle for boney deterministic sampling tests",
+  "main": "emit.js",
+  "scripts": {
+    "emit": "node emit.js 2>/dev/null > expected.json && node -e \"JSON.parse(require('fs').readFileSync('expected.json','utf8')); console.log('expected.json OK')\"",
+    "test": "node -e \"JSON.parse(require('fs').readFileSync('expected.json','utf8')); console.log('expected.json OK')\""
+  },
+  "engines": { "node": ">=18" }
+}

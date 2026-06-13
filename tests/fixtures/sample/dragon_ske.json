@@ -1,0 +1,47 @@
+{
+  "version": "5.7.0",
+  "compatibleVersion": "5.0.0",
+  "name": "oracle_sample",
+  "frameRate": 24,
+  "armature": [
+    {
+      "type": "Armature",
+      "name": "Dragon",
+      "frameRate": 24,
+      "bone": [
+        { "name": "root" },
+        { "name": "arm", "parent": "root", "length": 50, "transform": { "x": 50, "y": 0 } }
+      ],
+      "slot": [
+        { "name": "root_slot", "parent": "root" },
+        { "name": "arm_slot",  "parent": "arm"  }
+      ],
+      "skin": [
+        {
+          "name": "",
+          "slot": [
+            { "name": "root_slot", "display": [{ "type": "image", "name": "root_img" }] },
+            { "name": "arm_slot",  "display": [{ "type": "image", "name": "arm_img"  }] }
+          ]
+        }
+      ],
+      "animation": [
+        {
+          "duration": 24,
+          "playTimes": 0,
+          "name": "idle",
+          "bone": [
+            {
+              "name": "root",
+              "rotateFrame": [
+                { "duration": 24, "tweenEasing": 0, "rotate": 0 },
+                { "duration": 0,  "rotate": 90 }
+              ]
+            }
+          ]
+        }
+      ],
+      "ik": []
+    }
+  ]
+}
