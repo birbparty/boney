@@ -1,12 +1,13 @@
-## Parse DragonBones armature, bone, slot, and IK data from a 5.5–5.7 JSON string.
+## Parse DragonBones armature, bone, slot, skin, and IK data from a 5.5–5.7 JSON string.
 ##
 ## Entry point: parseDragonBones(json) → DragonBonesData
-## Skins are populated by boney-706; animation timelines by boney-56w.
+## Animation timelines are populated by boney-56w.
 
 import std/[options, sequtils]
 import jsony
 import bumpy
 import dragonbones/model/model
+import dragonbones/parse/slot
 
 # ── Wire types (private, mirror DragonBones JSON structure) ───────────────────
 
@@ -72,6 +73,7 @@ type
     aabb: Option[RawAabb]
     bone: seq[RawBone]
     slot: seq[RawSlot]
+    skin: seq[RawSkin]
     ik: seq[RawIK]
     ## isGlobal (DragonBones 4.x armature flag) is intentionally ignored;
     ## 5.x files omit it and use per-bone inherit* flags instead.
@@ -166,7 +168,7 @@ proc toArmatureData(r: RawArmature, topFrameRate: int): ArmatureData =
                aabb: (if r.aabb.isSome: r.aabb.get().toRect() else: Rect()),  ## zero Rect = no aabb
                bones: r.bone.mapIt(it.toBoneData()),
                slots: r.slot.mapIt(it.toSlotData()),
-               skins: @[],        ## populated by boney-706
+               skins: parseSkins(r.skin),
                animations: @[],   ## populated by boney-56w
                ikConstraints: r.ik.mapIt(it.toIKConstraintData()),
                defaultActions: @[])
@@ -175,8 +177,8 @@ proc toArmatureData(r: RawArmature, topFrameRate: int): ArmatureData =
 
 proc parseDragonBones*(json: string): DragonBonesData =
   ## Parse a DragonBones 5.5–5.7 _ske.json string into DragonBonesData.
-  ## Raises jsony.JsonError on malformed JSON. Skins (boney-706) and animation
-  ## timelines (boney-56w) are not yet populated.
+  ## Raises jsony.JsonError on malformed JSON. Animation timelines (boney-56w)
+  ## are not yet populated.
   let raw = json.fromJson(RawFile)
   DragonBonesData(version: raw.version,
                   compatibleVersion: raw.compatibleVersion,
