@@ -307,3 +307,44 @@ suite "collectEvents — output management":
     var evts = @[AnimEvent(kind: ekFrame, frameData: FrameEventData(name: "stale"))]
     collectEvents(anim, fps, 0.5'f32, 0.3'f32, evts)  ## backwards time
     check evts.len == 0
+
+# ── Large-dt initial start ────────────────────────────────────────────────────
+
+suite "collectEvents — large-dt initial start":
+
+  test "looping: event past currWrap in first loop fires (initial dt > duration)":
+    ## Event at frame 20 in a 24-frame loop. First update covers currRaw=30
+    ## (currWrap=6, currLoopN=1). Frame 20 is in (6, 24] — tail of first loop.
+    let anim = mkAnim(24, 0, @[mkFrameKF(20, "late")])
+    var evts: seq[AnimEvent]
+    collectEvents(anim, fps, -frameDt, 30.0'f32 / float32(fps), evts)
+    check frameNames(evts) == @["late"]
+
+  test "looping: events in both tail and head fire when initial dt > duration":
+    ## Events at frame 20 (tail) and frame 3 (head of second loop).
+    let kfs = @[mkFrameKF(3, "head"), mkFrameKF(20, "tail")]
+    let anim = mkAnim(24, 0, kfs)
+    var evts: seq[AnimEvent]
+    collectEvents(anim, fps, -frameDt, 30.0'f32 / float32(fps), evts)
+    ## tail fires first (end of first loop), then head (start of second loop)
+    check frameNames(evts) == @["tail", "head"]
+
+  test "looping: normal first update (dt < duration) unchanged":
+    ## Ensure the large-dt branch doesn't affect normal-first-update behavior.
+    let anim = mkAnim(24, 0, @[mkFrameKF(5, "mid")])
+    var evts: seq[AnimEvent]
+    collectEvents(anim, fps, -frameDt, 6.0'f32 / float32(fps), evts)
+    check frameNames(evts) == @["mid"]
+
+  test "finite: event past currWrap in first loop fires (initial dt > duration)":
+    ## Event at frame 20 in a 24-frame, 2-play animation. First update currRaw=30.
+    let anim = mkAnim(24, 2, @[mkFrameKF(20, "late")])
+    var evts: seq[AnimEvent]
+    collectEvents(anim, fps, -frameDt, 30.0'f32 / float32(fps), evts)
+    check frameNames(evts) == @["late"]
+
+  test "zero fps returns empty":
+    let anim = mkAnim(24, 0, @[mkFrameKF(5, "e")])
+    var evts: seq[AnimEvent]
+    collectEvents(anim, 0, -frameDt, 6.0'f32 / float32(fps), evts)
+    check evts.len == 0

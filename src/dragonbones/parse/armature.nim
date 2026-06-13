@@ -177,7 +177,7 @@ proc toArmatureData(r: RawArmature, topFrameRate: int): ArmatureData =
                skins: parseSkins(r.skin),
                animations: parseAnimations(r.animation),
                ikConstraints: r.ik.mapIt(it.toIKConstraintData()),
-               defaultActions: r.defaultActions.mapIt(it.gotoAndPlay))
+               defaultActions: r.defaultActions.mapIt(it.gotoAndPlay).filterIt(it.len > 0))
 
 # ── Public API ─────────────────────────────────────────────────────────────────
 
