@@ -8,7 +8,9 @@
 ##
 ##   Per-field math:
 ##     translate  x, y    : lerp(a, b, w)
-##     rotate  skX, skY   : lerp(a, b, w)  — linear-degree lerp, valid for 2D
+##     rotate  skX, skY   : shortest-arc lerp (delta clamped to [-180°,180°]
+##                          before scaling), so blending always takes the short
+##                          path around the circle
 ##     scale   scX, scY   : lerp(a, b, w)  — linear scale lerp (sufficient for
 ##                          short fades; log-space is more correct for large
 ##                          scale ratios but adds cost and is rarely needed)
@@ -23,9 +25,11 @@
 ##   Per-field math:
 ##     translate  x, y    : base.x + layer.x * w
 ##     rotate  skX, skY   : base.skX + layer.skX * w
-##     scale   scX, scY   : base.scX * lerp(1.0, layer.scX, w)
-##                          — weight=0 leaves base unchanged; weight=1 fully
-##                          applies the layer scale; lerp(1, x, w)=(1+(x-1)*w)
+##     scale   scX, scY   : base.scX * lerp(1.0, layer_delta.scX, w)
+##                          where layer_delta.scX is the scale DELTA above the
+##                          layer bone's rest pose (caller must strip rest before
+##                          passing; if layer rest.scX=1.0 this is already the
+##                          sampleAnimation output); lerp(1,x,w) = 1+(x-1)*w
 ##     slot color mult    : base.aM * lerp(1.0, layer.aM, w) per channel
 ##     slot color offset  : base.aO + layer.aO * w per channel
 ##     slot displayIndex  : unchanged (additive layers do not override display)
@@ -38,12 +42,21 @@ import dragonbones/anim/sample
 
 proc lerp32(a, b, t: float32): float32 {.inline.} = a + (b - a) * t
 
+proc lerpDeg(a, b, t: float32): float32 {.inline.} =
+  ## Shortest-arc lerp between two angles in degrees.
+  ## Wraps the delta to [-180, 180] before interpolating to always take the
+  ## short way around (e.g. 350°→10° at t=0.5 gives 0°, not 180°).
+  var d = b - a
+  if d > 180.0'f32: d -= 360.0'f32
+  elif d < -180.0'f32: d += 360.0'f32
+  a + d * t
+
 proc blendTransform(a, b: DbTransform, w: float32): DbTransform {.inline.} =
   DbTransform(
     x:   lerp32(a.x,   b.x,   w),
     y:   lerp32(a.y,   b.y,   w),
-    skX: lerp32(a.skX, b.skX, w),
-    skY: lerp32(a.skY, b.skY, w),
+    skX: lerpDeg(a.skX, b.skX, w),
+    skY: lerpDeg(a.skY, b.skY, w),
     scX: lerp32(a.scX, b.scX, w),
     scY: lerp32(a.scY, b.scY, w))
 
@@ -73,12 +86,16 @@ proc crossfadeAnimations*(
   ##
   ## Allocation budget: zero per frame when all four seqs are pre-sized.
   ##
-  ## Call propagateWorldTransforms after this proc.
+  ## `weight` is clamped to [0, 1] — out-of-range values do not extrapolate.
+  ##
+  ## On return, `bones[i].localMatrix` and `worldMatrix` are stale; call
+  ## propagateWorldTransforms to recompute the world hierarchy.
   doAssert bones.len == armData.bones.len,
     "bones must be parallel to armData.bones"
   doAssert slots.len == armData.slots.len,
     "slots must be parallel to armData.slots"
 
+  let w = clamp(weight, 0.0'f32, 1.0'f32)
   let n = armData.bones.len
   let m = armData.slots.len
   if scratchBones.len < n: scratchBones.setLen(n)
@@ -88,14 +105,14 @@ proc crossfadeAnimations*(
   sampleAnimation(animA, armData, timeA, scratchBones, scratchSlots)
   sampleAnimation(animB, armData, timeB, bones, slots)
 
-  # Blend output = lerp(scratch[A], output[B], weight)
+  # Blend output = lerp(scratch[A], output[B], w)
   for i in 0 ..< n:
     bones[i].localTransform = blendTransform(
-      scratchBones[i].localTransform, bones[i].localTransform, weight)
+      scratchBones[i].localTransform, bones[i].localTransform, w)
 
   for i in 0 ..< m:
-    slots[i].color = blendColor(scratchSlots[i].color, slots[i].color, weight)
+    slots[i].color = blendColor(scratchSlots[i].color, slots[i].color, w)
     # Discrete slot fields step at the midpoint.
-    if weight < 0.5'f32:
+    if w < 0.5'f32:
       slots[i].displayIndex = scratchSlots[i].displayIndex
       slots[i].blendMode    = scratchSlots[i].blendMode

@@ -270,3 +270,138 @@ suite "crossfadeAnimations — scratch management":
         mkRotAnim(0.0'f32), 0.0'f32,
         mkRotAnim(0.0'f32), 0.0'f32,
         0.5'f32, bones, slots, sb, ss)
+
+# ── Weight clamping ───────────────────────────────────────────────────────────
+
+suite "crossfadeAnimations — weight clamping":
+
+  test "weight=-0.5 clamped to 0: pure animA":
+    let arm = mkArmature(1, 1)
+    var bones = newBones(1); var slots = newSlots(1)
+    var sb: seq[BoneState]; var ss: seq[SlotState]
+    crossfadeAnimations(arm,
+      mkRotAnim(30.0'f32), 0.0'f32,
+      mkRotAnim(90.0'f32), 0.0'f32,
+      -0.5'f32, bones, slots, sb, ss)
+    check approx(bones[0].localTransform.skX, 30.0'f32)
+
+  test "weight=1.5 clamped to 1: pure animB":
+    let arm = mkArmature(1, 1)
+    var bones = newBones(1); var slots = newSlots(1)
+    var sb: seq[BoneState]; var ss: seq[SlotState]
+    crossfadeAnimations(arm,
+      mkRotAnim(30.0'f32), 0.0'f32,
+      mkRotAnim(90.0'f32), 0.0'f32,
+      1.5'f32, bones, slots, sb, ss)
+    check approx(bones[0].localTransform.skX, 90.0'f32)
+
+  test "weight=-0.5: color does not extrapolate below animA":
+    ## Without clamping, lerp at w=-0.5 would give aM > 1.0. With clamping = 0.
+    let arm = mkArmature(1, 1)
+    let animA = AnimationData(name: "A", duration: 24)
+    let animB = AnimationData(name: "B", duration: 24, playTimes: 0,
+      timelines: @[Timeline(name: "slot0", kind: tlSlotColor,
+        colorKFs: @[colorKF(0, 24,
+          DbColor(aM: 0.0'f32, rM: 1.0'f32, gM: 1.0'f32, bM: 1.0'f32))])])
+    var bones = newBones(1); var slots = newSlots(1)
+    var sb: seq[BoneState]; var ss: seq[SlotState]
+    crossfadeAnimations(arm, animA, 0.0'f32, animB, 0.0'f32,
+                        -0.5'f32, bones, slots, sb, ss)
+    check approx(slots[0].color.aM, 1.0'f32)  ## pure animA (rest = 1.0)
+
+# ── Slot blendMode ────────────────────────────────────────────────────────────
+## Note: the current model has no tlSlotBlend keyframe type; blendMode is
+## always initialized from armData.slots[i].blendMode (rest pose). The step
+## logic in crossfadeAnimations is forward-compatible but currently a no-op.
+
+suite "crossfadeAnimations — slot blendMode":
+
+  test "non-default blendMode preserved at weight=0 (animA side)":
+    var arm = mkArmature(1, 1)
+    arm.slots[0].blendMode = bmAdd
+    let animA = AnimationData(name: "A", duration: 24)
+    let animB = AnimationData(name: "B", duration: 24)
+    var bones = newBones(1); var slots = newSlots(1)
+    var sb: seq[BoneState]; var ss: seq[SlotState]
+    crossfadeAnimations(arm, animA, 0.0'f32, animB, 0.0'f32,
+                        0.0'f32, bones, slots, sb, ss)
+    check slots[0].blendMode == bmAdd
+
+  test "non-default blendMode preserved at weight=1 (animB side)":
+    var arm = mkArmature(1, 1)
+    arm.slots[0].blendMode = bmAdd
+    let animA = AnimationData(name: "A", duration: 24)
+    let animB = AnimationData(name: "B", duration: 24)
+    var bones = newBones(1); var slots = newSlots(1)
+    var sb: seq[BoneState]; var ss: seq[SlotState]
+    crossfadeAnimations(arm, animA, 0.0'f32, animB, 0.0'f32,
+                        1.0'f32, bones, slots, sb, ss)
+    check slots[0].blendMode == bmAdd
+
+# ── Color offset channels ─────────────────────────────────────────────────────
+
+suite "crossfadeAnimations — color offset channels":
+
+  test "aO/rO/gO/bO lerped at weight=0.5":
+    ## animA rest pose: all offsets 0. animB sets aO=1.0, rO=0.5, gO=0.25, bO=0.125.
+    ## At weight=0.5: expected half of animB's offset above animA's zero.
+    let arm = mkArmature(1, 1)
+    let animA = AnimationData(name: "A", duration: 24)
+    let animB = AnimationData(name: "B", duration: 24, playTimes: 0,
+      timelines: @[Timeline(name: "slot0", kind: tlSlotColor,
+        colorKFs: @[colorKF(0, 24,
+          DbColor(aM: 1.0'f32, rM: 1.0'f32, gM: 1.0'f32, bM: 1.0'f32,
+                  aO: 1.0'f32, rO: 0.5'f32, gO: 0.25'f32, bO: 0.125'f32))])])
+    var bones = newBones(1); var slots = newSlots(1)
+    var sb: seq[BoneState]; var ss: seq[SlotState]
+    crossfadeAnimations(arm, animA, 0.0'f32, animB, 0.0'f32,
+                        0.5'f32, bones, slots, sb, ss)
+    check approx(slots[0].color.aO, 0.5'f32)
+    check approx(slots[0].color.rO, 0.25'f32)
+    check approx(slots[0].color.gO, 0.125'f32)
+    check approx(slots[0].color.bO, 0.0625'f32)
+
+  test "aO/rO/gO/bO at weight=0: pure animA offsets (rest = 0)":
+    let arm = mkArmature(1, 1)
+    let animA = AnimationData(name: "A", duration: 24)
+    let animB = AnimationData(name: "B", duration: 24, playTimes: 0,
+      timelines: @[Timeline(name: "slot0", kind: tlSlotColor,
+        colorKFs: @[colorKF(0, 24,
+          DbColor(aM: 1.0'f32, rM: 1.0'f32, gM: 1.0'f32, bM: 1.0'f32,
+                  aO: 1.0'f32, rO: 1.0'f32, gO: 1.0'f32, bO: 1.0'f32))])])
+    var bones = newBones(1); var slots = newSlots(1)
+    var sb: seq[BoneState]; var ss: seq[SlotState]
+    crossfadeAnimations(arm, animA, 0.0'f32, animB, 0.0'f32,
+                        0.0'f32, bones, slots, sb, ss)
+    check approx(slots[0].color.aO, 0.0'f32)
+    check approx(slots[0].color.rO, 0.0'f32)
+    check approx(slots[0].color.gO, 0.0'f32)
+    check approx(slots[0].color.bO, 0.0'f32)
+
+# ── Rotation shortest-arc ─────────────────────────────────────────────────────
+
+suite "crossfadeAnimations — rotation shortest-arc":
+
+  test "350° to 10° at weight=0.5 takes short path: result near 0°":
+    ## Without shortest-arc: lerp(350, 10, 0.5) = 180°. With shortest-arc:
+    ## delta = 10 - 350 = -340 → wrap to 20 → 350 + 20*0.5 = 360° ≡ 0°.
+    let arm = mkArmature(1, 1)
+    var bones = newBones(1); var slots = newSlots(1)
+    var sb: seq[BoneState]; var ss: seq[SlotState]
+    crossfadeAnimations(arm,
+      mkRotAnim(350.0'f32), 0.0'f32,
+      mkRotAnim(10.0'f32),  0.0'f32,
+      0.5'f32, bones, slots, sb, ss)
+    ## lerpDeg: d = 10-350 = -340 → +360 = 20 → 350 + 20*0.5 = 360°.
+    check approx(bones[0].localTransform.skX, 360.0'f32)
+
+  test "170° to -170° at weight=0.5 takes short path: result near 180°":
+    ## delta = -170 - 170 = -340 → wrap to 20 → 170 + 20*0.5 = 180°.
+    let arm = mkArmature(1, 1)
+    var bones = newBones(1); var slots = newSlots(1)
+    var sb: seq[BoneState]; var ss: seq[SlotState]
+    crossfadeAnimations(arm,
+      mkRotAnim(170.0'f32),  0.0'f32,
+      mkRotAnim(-170.0'f32), 0.0'f32,
+      0.5'f32, bones, slots, sb, ss)
+    check approx(bones[0].localTransform.skX, 180.0'f32)
