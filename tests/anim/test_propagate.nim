@@ -4,6 +4,9 @@ import dragonbones/model/model
 import dragonbones/anim/transform
 import dragonbones/anim/propagate
 
+# Module-level scratch buffer reused across all tests (zero-alloc after first use).
+var propagateScratch: seq[DbTransform]
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 const Eps = 1e-4'f32
@@ -84,7 +87,7 @@ suite "propagate — root bone":
                          skX: 45.0'f32, skY: 45.0'f32,
                          scX: 2.0'f32, scY: 0.5'f32)
     var bs = boneStates(@[t])
-    propagateWorldTransforms(a, bs)
+    propagateWorldTransforms(a, bs, propagateScratch)
     ## world matrix and local matrix must transform test points identically
     let w = bs[0].worldMatrix
     let l = bs[0].localMatrix
@@ -100,7 +103,7 @@ suite "propagate — root bone":
   test "root localMatrix also set":
     let a = arm(@[boneI("root", "")])
     var bs = boneStates(@[DbTransform(x: 1.0'f32, y: 2.0'f32, scX: 1.0'f32, scY: 1.0'f32)])
-    propagateWorldTransforms(a, bs)
+    propagateWorldTransforms(a, bs, propagateScratch)
     let v = bs[0].localMatrix * vec3(0.0'f32, 0.0'f32, 1.0'f32)
     check approxEq(v.x, 1.0'f32)
     check approxEq(v.y, 2.0'f32)
@@ -116,7 +119,7 @@ suite "propagate — full inheritance":
     var bs = boneStates(@[
       DbTransform(x: 10.0'f32, y: 0.0'f32, scX: 1.0'f32, scY: 1.0'f32),
       dbTransformIdentity()])
-    propagateWorldTransforms(a, bs)
+    propagateWorldTransforms(a, bs, propagateScratch)
     ## child world translation = parent.x + 0*cos(0) - 0*sin(0) = 10
     let v = bs[1].worldMatrix * vec3(0.0'f32, 0.0'f32, 1.0'f32)
     check approxEq(v.x, 10.0'f32)
@@ -129,7 +132,7 @@ suite "propagate — full inheritance":
     let childT  = DbTransform(x: 5.0'f32, scX: 1.0'f32, scY: 1.0'f32)
     let a = arm(@[bone("root", "", parentT), boneI("child", "root")])
     var bs = boneStates(@[parentT, childT])
-    propagateWorldTransforms(a, bs)
+    propagateWorldTransforms(a, bs, propagateScratch)
     let v = bs[1].worldMatrix * vec3(0.0'f32, 0.0'f32, 1.0'f32)
     check approxEq(v.x, 0.0'f32)
     check approxEq(v.y, 5.0'f32)
@@ -139,7 +142,7 @@ suite "propagate — full inheritance":
     let childT  = DbTransform(x: 1.0'f32, scX: 1.0'f32, scY: 1.0'f32)
     let a = arm(@[bone("root", "", parentT), boneI("child", "root")])
     var bs = boneStates(@[parentT, childT])
-    propagateWorldTransforms(a, bs)
+    propagateWorldTransforms(a, bs, propagateScratch)
     ## child local x=1; parent scX=2 → child world x=2
     let v = bs[1].worldMatrix * vec3(0.0'f32, 0.0'f32, 1.0'f32)
     check approxEq(v.x, 2.0'f32)
@@ -151,7 +154,7 @@ suite "propagate — full inheritance":
                    bone("mid", "root", t10),
                    bone("leaf", "mid", t10)])
     var bs = boneStates(@[t10, t10, t10])
-    propagateWorldTransforms(a, bs)
+    propagateWorldTransforms(a, bs, propagateScratch)
     let v = bs[2].worldMatrix * vec3(0.0'f32, 0.0'f32, 1.0'f32)
     check approxEq(v.x, 30.0'f32)
 
@@ -166,7 +169,7 @@ suite "propagate — inheritance flags":
       bone("root", "", parentT),
       bone("child", "root", childT, inhTr = false)])
     var bs = boneStates(@[parentT, childT])
-    propagateWorldTransforms(a, bs)
+    propagateWorldTransforms(a, bs, propagateScratch)
     let v = bs[1].worldMatrix * vec3(0.0'f32, 0.0'f32, 1.0'f32)
     check approxEq(v.x, 3.0'f32)
     check approxEq(v.y, 4.0'f32)
@@ -178,7 +181,7 @@ suite "propagate — inheritance flags":
       bone("root", "", parentT),
       bone("child", "root", childT, inhRo = false)])
     var bs = boneStates(@[parentT, childT])
-    propagateWorldTransforms(a, bs)
+    propagateWorldTransforms(a, bs, propagateScratch)
     ## child world rotation = 0° (its local), not 90° from parent
     ## Check: (1,0,1) maps to ~(1,0) not (0,1)
     let v = bs[1].worldMatrix * vec3(1.0'f32, 0.0'f32, 0.0'f32)
@@ -192,7 +195,7 @@ suite "propagate — inheritance flags":
       bone("root", "", parentT),
       bone("child", "root", childT, inhSc = false)])
     var bs = boneStates(@[parentT, childT])
-    propagateWorldTransforms(a, bs)
+    propagateWorldTransforms(a, bs, propagateScratch)
     ## child scale should be 2 (its own), not 6 (3*2)
     let v = bs[1].worldMatrix * vec3(1.0'f32, 0.0'f32, 0.0'f32)
     check approxEq(v.x, 2.0'f32)
@@ -205,7 +208,7 @@ suite "propagate — inheritance flags":
       bone("root", "", parentT),
       bone("child", "root", childT, inhRo = false, inhSc = false)])
     var bs = boneStates(@[parentT, childT])
-    propagateWorldTransforms(a, bs)
+    propagateWorldTransforms(a, bs, propagateScratch)
     ## child should behave like an identity relative to parent position
     let v = bs[1].worldMatrix * vec3(1.0'f32, 0.0'f32, 0.0'f32)
     check approxEq(v.x, 1.0'f32)
