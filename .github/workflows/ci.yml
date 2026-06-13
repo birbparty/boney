@@ -61,6 +61,7 @@ jobs:
             src/dragonbones/anim/emit.nim \
             src/dragonbones/anim/events.nim \
             src/dragonbones/anim/ik.nim \
+            src/dragonbones/anim/hittest.nim \
             src/dragonbones/parse/armature.nim \
             src/dragonbones/atlas/atlas.nim \
             src/dragonbones/boundary.nim; do
