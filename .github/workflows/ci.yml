@@ -15,7 +15,51 @@ concurrency:
 permissions:
   contents: read
 
+# ── Primary invariant gate ────────────────────────────────────────────────────
+# Runs fast, requires no SDK, and is checked before the full test suite starts.
+# Required status check: this job must pass before merging.
 jobs:
+  invariants:
+    name: Invariants (purity + ARM compile)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Nim
+        uses: jiro4989/setup-nim-action@v2
+        with:
+          nim-version: "2.2.x"
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cache Nimble packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nimble
+          key: nimble-ubuntu-2.2.x-${{ hashFiles('boney.nimble') }}
+          restore-keys: nimble-ubuntu-2.2.x-
+
+      - name: Install dependencies
+        run: nimble install -y --depsOnly
+
+      - name: Core purity test
+        # Verifies no desktop-only imports (jsony, naylib, etc.) leak into core.
+        run: nim r --hints:off tests/test_core_purity.nim
+
+      - name: SDK-free ARM compile check
+        # nim.cfg provides --mm:arc --define:useMalloc; only cross-compile flags added here.
+        # Catches ARM-specific issues (alignment, ABI, mm:arc edge cases) without devkitARM.
+        run: |
+          for module in \
+            src/dragonbones/anim/sample.nim \
+            src/dragonbones/parse/armature.nim \
+            src/dragonbones/atlas/atlas.nim \
+            src/dragonbones/boundary.nim; do
+            nim check --hints:off --os:linux --cpu:arm --opt:size "$module"
+          done
+
+# ── Full test suite ───────────────────────────────────────────────────────────
+# Matrix across OS and Nim versions. Required status check.
   test:
     name: Tests (Nim ${{ matrix.nim }}, ${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -45,18 +89,45 @@ jobs:
       - name: Install dependencies
         run: nimble install -y --depsOnly
 
-      - name: Compile check (core subsystems, host triple)
-        run: |
-          nim check --hints:off src/dragonbones/anim/sample.nim
-          nim check --hints:off src/dragonbones/parse/armature.nim
-          nim check --hints:off src/dragonbones/atlas/atlas.nim
-          nim check --hints:off src/dragonbones/boundary.nim
-
-      - name: Compile check (ARM cross-compile, no SDK required)
-        # nim.cfg provides --mm:arc --define:useMalloc globally; only cross-compile flags added here.
-        run: |
-          nim check --hints:off --os:linux --cpu:arm --opt:size \
-            src/dragonbones/anim/sample.nim
-
       - name: Run test suite
         run: nimble test
+
+# ── Optional console gates (SDK-gated; never block a merge) ──────────────────
+# These run only when the corresponding repository secret is configured.
+# Configure via Settings → Secrets and variables → Actions (repository secrets).
+  console-3ds:
+    name: Console — Nintendo 3DS
+    runs-on: ubuntu-latest
+    if: ${{ secrets.DEVKITPRO != '' }}
+    env:
+      DEVKITPRO: ${{ secrets.DEVKITPRO }}
+      DEVKITARM: ${{ secrets.DEVKITARM }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Nim
+        uses: jiro4989/setup-nim-action@v2
+        with:
+          nim-version: "2.2.x"
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install dependencies
+        run: nimble install -y --depsOnly
+      - name: 3DS compile check
+        run: bash scripts/build_3ds.sh
+
+  console-vita:
+    name: Console — Sony PS Vita
+    runs-on: ubuntu-latest
+    if: ${{ secrets.VITASDK != '' }}
+    env:
+      VITASDK: ${{ secrets.VITASDK }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Nim
+        uses: jiro4989/setup-nim-action@v2
+        with:
+          nim-version: "2.2.x"
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install dependencies
+        run: nimble install -y --depsOnly
+      - name: Vita compile check
+        run: bash scripts/build_vita.sh
