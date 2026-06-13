@@ -88,13 +88,15 @@ proc propagateWorldTransforms*(armData: ArmatureData, bones: var seq[BoneState],
   ## Requires: armData.bones are in parent-before-child order (DragonBones guarantee).
   ##
   ## scratch is a caller-managed work buffer used to accumulate world DbTransforms
-  ## during the propagation pass. Initialise it once (newSeq[DbTransform](arm.bones.len))
-  ## and reuse it every frame — this proc calls setLen if it is too small, so it
-  ## is safe to pass an empty seq; it grows on first call and stays stable thereafter.
+  ## during the propagation pass. The contract is `scratch.len >= armData.bones.len`:
+  ## pass an empty seq and it grows on the first call; pre-size to the largest armature
+  ## you will ever animate and it is never reallocated again. One shared scratch buffer
+  ## across multiple armatures stays allocation-free as long as it is pre-sized to the
+  ## maximum bone count.
   ##
   ## Allocation budget: zero heap allocations per frame when scratch is pre-sized
-  ## to armData.bones.len. sampleAnimation and deformMeshVertices are also zero-alloc
-  ## when their var-output buffers are pre-allocated. The full animation pipeline
+  ## to at least armData.bones.len. sampleAnimation and deformMeshVertices are also
+  ## zero-alloc when their var-output buffers are pre-allocated. The full pipeline
   ## (sampleAnimation → propagateWorldTransforms → sampleFFDOffsets → deformMeshVertices)
   ## is allocation-free in the steady state.
   ##

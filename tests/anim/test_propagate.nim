@@ -5,6 +5,7 @@ import dragonbones/anim/transform
 import dragonbones/anim/propagate
 
 # Module-level scratch buffer reused across all tests (zero-alloc after first use).
+# Carry-over between tests is harmless: propagate overwrites every live slot before reading.
 var propagateScratch: seq[DbTransform]
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
