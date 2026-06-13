@@ -24,7 +24,9 @@ type
 
   ## Skew-based affine transform mirroring the DragonBones JSON on-wire format.
   ## x/y: translation; skX/skY: skew in degrees (pure rotation: skX ≈ skY);
-  ## scX/scY: scale. Convert to Mat3 via toMat3 for chained matrix computation.
+  ## scX/scY: scale. skX/skY are independent skew axes, not a single rotation angle,
+  ## so a bespoke dbTransformToMat3 helper is needed for matrix chain computation
+  ## (no single vmath proc maps DbTransform → Mat3 directly).
   DbTransform* = object
     x*, y*: float32
     skX*, skY*: float32    ## degrees, NOT radians
@@ -36,6 +38,8 @@ type
   DbColor* = object
     aM*, rM*, gM*, bM*: float32
     aO*, rO*, gO*, bO*: float32
+
+const DisplayIndexHidden* = -1  ## displayIndex sentinel: slot shows nothing
 
 proc dbTransformIdentity*(): DbTransform =
   DbTransform(scX: 1.0, scY: 1.0)
@@ -133,7 +137,7 @@ type
   SlotData* = object
     name*: string
     boneName*: string                   ## parent bone
-    displayIndex*: int                  ## default display (-1 = hidden)
+    displayIndex*: int                  ## default display (DisplayIndexHidden = hidden)
     blendMode*: BlendMode
     color*: DbColor                     ## default slot color
 
@@ -146,7 +150,9 @@ type
     boneName*: string                   ## end-effector bone
     targetName*: string                 ## IK target bone
     bendPositive*: bool
-    chain*: int                         ## chain length: 0 = one bone, 1 = two
+    ## Bones in chain beyond the end-effector: 0 = end-effector only (one bone),
+    ## 1 = parent + end-effector (two bones). Mirrors DragonBones `chain` field.
+    chain*: int
     weight*: float32                    ## blend weight 0–1
 
 # ── Animation keyframe types ──────────────────────────────────────────────────
@@ -172,7 +178,7 @@ type
 
   SlotDisplayKF* = object
     base*: KeyframeBase
-    displayIndex*: int
+    displayIndex*: int                  ## DisplayIndexHidden hides the slot
 
   SlotColorKF* = object
     base*: KeyframeBase
@@ -190,7 +196,9 @@ type
     bendPositive*: bool
     weight*: float32
 
-  ## ZOrder keyframe: sparse reorder deltas for named slots.
+  ## ZOrder keyframe: sparse reorder deltas by slot array index.
+  ## slotIndex is an index into ArmatureData.slots (not a slot name).
+  ## parse/ resolves slot names to indices when building this list.
   ZOrderKeyframe* = object
     base*: KeyframeBase
     slotOffsets*: seq[tuple[slotIndex: int, zOffset: int]]
@@ -263,7 +271,7 @@ type
     worldMatrix*:  Mat3
 
   SlotState* = object
-    displayIndex*: int
+    displayIndex*: int                  ## DisplayIndexHidden hides the slot
     color*: DbColor
     blendMode*: BlendMode
 
