@@ -10,8 +10,10 @@
 ## The atlasData.subTextures lookup is O(n) per visible slot. For large
 ## armatures, build a precomputed name→index map at load time.
 ##
-## Allocation budget: one seq[Vec2] grow for each newly-seen mesh slot; the
-## meshScratch buffer auto-grows and is reused every frame.
+## Allocation budget: meshScratch auto-grows per mesh slot and is reused; one
+## seq[Vec2](n) is allocated per visible mesh slot per frame for worldVerts
+## (owned by the DrawMesh in output). The armature slot-state seq passed in as
+## `slots` must have len >= armData.slots.len.
 
 import vmath
 import bumpy
@@ -59,7 +61,7 @@ proc emitDrawCommands*(
 
   for zIdx in 0 ..< drawOrder.len:
     let si = drawOrder[zIdx]
-    if si < 0 or si >= armData.slots.len: continue
+    if si < 0 or si >= armData.slots.len or si >= slots.len: continue
     let slotState = slots[si]
     if slotState.displayIndex < 0: continue
 
@@ -71,7 +73,7 @@ proc emitDrawCommands*(
     let display = skinSlot.displays[slotState.displayIndex]
 
     let boneI = findBone(armData, slotData.boneName)
-    let boneWorld = if boneI >= 0: bones[boneI].worldMatrix else: mat3()
+    let boneWorld = if boneI >= 0: bones[boneI].worldMatrix else: mat3()  # mat3() = identity in vmath
     let dispMat = dbTransformToMat3(display.transform)
     let combinedMat = boneWorld * dispMat
 
