@@ -106,6 +106,29 @@ type
     name*: string
     frame*: seq[RawIKFrame]
 
+# ── Event timeline wire types ─────────────────────────────────────────────────
+
+type
+  RawFrameEventEntry* = object
+    name*:    string
+    bone*:    string            ## JSON "bone" → boneName; "" when absent
+    ints*:    seq[int]
+    floats*:  seq[float32]
+    strings*: seq[string]
+
+  RawSoundEntry* = object
+    name*: string
+
+  RawActionEntry* = object
+    gotoAndPlay*: string        ## DB 4.x / some 5.x exporters use this key
+    name*:        string        ## DB 5.x "name" field; used when gotoAndPlay is absent
+
+  RawEventFrame* = object
+    duration*: int
+    events*:   seq[RawFrameEventEntry]
+    sounds*:   seq[RawSoundEntry]
+    actions*:  seq[RawActionEntry]
+
 # ── Public wire animation type (nested in RawArmature in armature.nim) ────────
 
 type
@@ -119,6 +142,7 @@ type
     ffd*: seq[RawFFDTimeline]
     zOrder*: Option[RawZOrder]
     ik*: seq[RawIKTimeline]
+    frame*: seq[RawEventFrame]  ## animation-level event/sound/action timeline
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -262,6 +286,25 @@ proc toIKTimelines(raws: seq[RawIKTimeline]): seq[Timeline] =
       frame += r.duration
     result.add(Timeline(name: raw.name, kind: tlIK, ikKFs: kfs))
 
+proc toEventKeyframes(raws: seq[RawEventFrame]): seq[EventKeyframe] =
+  var frame = 0
+  for r in raws:
+    var kf = EventKeyframe(frame: frame)
+    for e in r.events:
+      kf.frameEvents.add(FrameEventData(name: e.name, boneName: e.bone,
+                                         ints: e.ints, floats: e.floats,
+                                         strings: e.strings))
+    for s in r.sounds:
+      kf.soundEvents.add(SoundEventData(name: s.name))
+    for a in r.actions:
+      # gotoAndPlay (DB 4.x style) takes priority; fall back to name field
+      let animName = if a.gotoAndPlay.len > 0: a.gotoAndPlay else: a.name
+      if animName.len > 0:
+        kf.actionEvents.add(ActionEventData(name: animName, boneName: ""))
+    if kf.frameEvents.len > 0 or kf.soundEvents.len > 0 or kf.actionEvents.len > 0:
+      result.add(kf)
+    frame += r.duration
+
 # ── Public API ────────────────────────────────────────────────────────────────
 
 proc parseAnimations*(raws: seq[RawAnimation]): seq[AnimationData] =
@@ -280,4 +323,5 @@ proc parseAnimations*(raws: seq[RawAnimation]): seq[AnimationData] =
       duration: raw.duration,
       playTimes: raw.playTimes,
       fadeInTime: raw.fadeInTime.get(0.0'f32),
-      timelines: timelines))
+      timelines: timelines,
+      eventKFs: toEventKeyframes(raw.frame)))

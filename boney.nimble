@@ -27,6 +27,7 @@ task test, "Run the test suite":
   exec "nim r tests/anim/test_draworder.nim"
   exec "nim r tests/anim/test_blend.nim"
   exec "nim r tests/anim/test_emit.nim"
+  exec "nim r tests/anim/test_events.nim"
   exec "nim r tests/atlas/test_atlas.nim"
   exec "nim r tests/golden/test_parse_golden.nim"
   exec "nim r tests/sampling/test_golden.nim"
