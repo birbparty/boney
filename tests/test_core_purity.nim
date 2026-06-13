@@ -16,14 +16,10 @@ import std/[unittest, os, strutils]
 ##
 ## Excluded:
 ##   - src/dragonbones/adapters/**  — adapters import their backends by design
-##   - jsony — NOT on the allowlist until boney-782 (jsony cross-compile spike) clears it
-##
 ## Intra-package import policy:
 ##   Bare/relative imports (./foo, ../bar/baz) are ALLOWED — they can only refer
 ##   to other files within the core source tree. Fully-qualified
 ##   `dragonbones/model/types` imports are also allowed.
-##   To add jsony to the allowlist after boney-782 clears it, add `"jsony"` to
-##   the `namedAllowlist` set in `isAllowed`.
 ##
 ## Adapted from birbparty/clckr tests/game/test_core_purity.nim.
 
@@ -35,13 +31,13 @@ const
   coreModules = ["model", "parse", "atlas", "anim"]
 
 proc isAllowed(m: string): bool =
-  ## A core module may import: bumpy, vmath, any std/* module, another
+  ## A core module may import: bumpy, vmath, jsony, any std/* module, another
   ## core module (dragonbones/<coreModule> or sub-paths), or a bare/relative
   ## import (./foo, ../bar/baz — always intra-package).
   ## Everything else — naylib, boxy, opengl, pixie, chroma, libctru, citro3d,
-  ## jsony (until boney-782 clears it), any future renderer — is forbidden.
-  # Named allowlist
-  if m == "bumpy" or m == "vmath": return true
+  ## any future renderer — is forbidden.
+  # Named allowlist (jsony approved by boney-782 cross-compile spike)
+  if m == "bumpy" or m == "vmath" or m == "jsony": return true
   # std/* standard library
   if m.startsWith("std/"): return true
   # Bare/relative imports: always intra-package (can only reference other files
@@ -192,7 +188,7 @@ suite "core purity":
     # Forbidden
     check not isAllowed("naylib")
     check not isAllowed("boxy")
-    check not isAllowed("jsony")                  # blocked until boney-782 clears it
+    check isAllowed("jsony")                       # approved by boney-782 cross-compile spike
     check not isAllowed("chroma")
     check not isAllowed("dragonbones/adapters/naylib")  # adapter is not core
     check not isAllowed("dragonbones/adapters/boxy")
