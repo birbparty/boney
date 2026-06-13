@@ -8,9 +8,8 @@
 ## any parse layer (armature, slot, skin, timeline, atlas) breaks immediately.
 ## Values are derived directly from the fixture files — no approximation.
 ##
-## VERSION_PIN: "5.7.0" / "5.0.0" — both files must match these DragonBones
-## versions. If a new fixture is checked in at a different version, update the
-## VERSION_MAJOR/VERSION_FULL constants below.
+## VERSION_PIN: to update the pinned version, change VersionFull/VersionCompat
+## below and update any assertions that reference the literal version strings.
 
 import std/[unittest, os]
 import vmath
@@ -23,11 +22,19 @@ const Eps = 1e-5'f32
 proc approxEq(a, b: float32): bool = abs(a - b) < Eps
 proc approxEqV(a, b: Vec2): bool = approxEq(a.x, b.x) and approxEq(a.y, b.y)
 
+const VersionFull   = "5.7.0"
+const VersionCompat = "5.0.0"
+
 let fixDir = currentSourcePath().parentDir() / ".." / "fixtures" / "sample"
 
 # Parse once; reuse across all suites.
 let gSke = parseDragonBones(readFile(fixDir / "dragon_ske.json"))
 let gTex = parseAtlas(readFile(fixDir / "dragon_tex.json"))
+
+proc findSub(tex: AtlasData, name: string): AtlasSubTexture =
+  for s in tex.subTextures:
+    if s.name == name: return s
+  doAssert false, "atlas subtexture '" & name & "' not found"
 
 proc findRotateTL(anim: AnimationData, boneName: string): Timeline =
   for tl in anim.timelines:
@@ -40,10 +47,10 @@ proc findRotateTL(anim: AnimationData, boneName: string): Timeline =
 suite "golden — version pin":
 
   test "skeleton version is 5.7.0":
-    check gSke.version == "5.7.0"
+    check gSke.version == VersionFull
 
   test "skeleton compatibleVersion is 5.0.0":
-    check gSke.compatibleVersion == "5.0.0"
+    check gSke.compatibleVersion == VersionCompat
 
   test "atlas name matches skeleton name (same rig)":
     check gTex.name == gSke.name
@@ -205,9 +212,7 @@ suite "golden — atlas top-level":
 
 suite "golden — atlas root_img (non-rotated, no trim)":
 
-  var sub: AtlasSubTexture
-  for s in gTex.subTextures:
-    if s.name == "root_img": sub = s; break
+  let sub = findSub(gTex, "root_img")
 
   test "name is root_img":
     check sub.name == "root_img"
@@ -245,9 +250,7 @@ suite "golden — atlas root_img (non-rotated, no trim)":
 
 suite "golden — atlas arm_img (rotated, trimmed)":
 
-  var sub: AtlasSubTexture
-  for s in gTex.subTextures:
-    if s.name == "arm_img": sub = s; break
+  let sub = findSub(gTex, "arm_img")
 
   test "name is arm_img":
     check sub.name == "arm_img"
