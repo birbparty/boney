@@ -1,0 +1,20 @@
+{
+  "name": "oracle_sample",
+  "imagePath": "oracle_sample.png",
+  "width": 256,
+  "height": 128,
+  "scale": 1,
+  "SubTexture": [
+    {
+      "name": "root_img",
+      "x": 0, "y": 0, "width": 64, "height": 32
+    },
+    {
+      "name": "arm_img",
+      "x": 64, "y": 0, "width": 32, "height": 50,
+      "rotated": true,
+      "frameX": -2, "frameY": -1,
+      "frameWidth": 54, "frameHeight": 52
+    }
+  ]
+}
