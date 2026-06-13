@@ -10,9 +10,20 @@ import std/[unittest, os, strutils]
 ## newly-added core module are ALL caught by default — only a deliberate edit to
 ## `coreModules` opts a dependency in.
 ##
-## Exclusions:
-##   - src/dragonbones/adapters/boxy/  — desktop-only, imports pixie, never pure
+## Scanned surface:
+##   - src/dragonbones.nim          (public aggregator / re-export facade)
+##   - src/dragonbones/{model,parse,atlas,anim}/**/*.nim  (core subsystems)
+##
+## Excluded:
+##   - src/dragonbones/adapters/**  — adapters import their backends by design
 ##   - jsony — NOT on the allowlist until boney-782 (jsony cross-compile spike) clears it
+##
+## Intra-package import policy:
+##   Bare/relative imports (./foo, ../bar/baz) are ALLOWED — they can only refer
+##   to other files within the core source tree. Fully-qualified
+##   `dragonbones/model/types` imports are also allowed.
+##   To add jsony to the allowlist after boney-782 clears it, add `"jsony"` to
+##   the `namedAllowlist` set in `isAllowed`.
 ##
 ## Adapted from birbparty/clckr tests/game/test_core_purity.nim.
 
@@ -24,12 +35,19 @@ const
   coreModules = ["model", "parse", "atlas", "anim"]
 
 proc isAllowed(m: string): bool =
-  ## A core module may import only: bumpy, vmath, any std/* module, or another
-  ## core module (dragonbones/<coreModule> or dragonbones/<coreModule>/*).
+  ## A core module may import: bumpy, vmath, any std/* module, another
+  ## core module (dragonbones/<coreModule> or sub-paths), or a bare/relative
+  ## import (./foo, ../bar/baz — always intra-package).
   ## Everything else — naylib, boxy, opengl, pixie, chroma, libctru, citro3d,
-  ## jsony (until the console spike clears it), any future renderer — is forbidden.
+  ## jsony (until boney-782 clears it), any future renderer — is forbidden.
+  # Named allowlist
   if m == "bumpy" or m == "vmath": return true
+  # std/* standard library
   if m.startsWith("std/"): return true
+  # Bare/relative imports: always intra-package (can only reference other files
+  # within src/dragonbones/ or its subdirectories)
+  if m.startsWith("./") or m.startsWith("../"): return true
+  # Qualified core module: dragonbones/model, dragonbones/model/types, etc.
   if m.startsWith("dragonbones/"):
     let rest = m[len("dragonbones/") .. ^1]
     # Direct core module: dragonbones/model
@@ -59,6 +77,9 @@ proc stripBlockComments(s: string): string =
 iterator importStatements(src: string): string =
   ## Yield each import/from/include statement, de-commented (line `#` and block
   ## `#[ ]#`) with bracket / trailing-comma continuations merged into one line.
+  ## Limitation: imports preceded by other code on the same line (e.g.
+  ## `discard 1; import foo`) are not detected — this is an acceptable limitation
+  ## for a core-purity check; such style is not idiomatic in Nim library code.
   let clean = stripBlockComments(src)
   var buf = ""
   var bracket = 0
@@ -96,11 +117,16 @@ proc splitTopLevel(s: string): seq[string] =
   if cur.strip().len > 0: result.add cur
 
 proc refsOf(part0: string): seq[string] =
-  ## Normalize one import item to module refs: handles `mod as alias` and the
-  ## bracket form `root/[a, b]` -> root/a, root/b.
+  ## Normalize one import item to module refs: handles `mod as alias`,
+  ## `mod except symbol`, and the bracket form `root/[a, b]` -> root/a, root/b.
   var part = part0.strip()
+  # Strip `except ...` clause: `import bumpy except foo` -> `bumpy`
+  let ep = part.find(" except ")
+  if ep >= 0: part = part[0 ..< ep].strip()
+  # Strip `as alias`: `import boxy as gfx` -> `boxy`
   let ap = part.find(" as ")
   if ap >= 0: part = part[0 ..< ap].strip()
+  # Bracket form: `std/[os, strutils]` -> `std/os`, `std/strutils`
   let bi = part.find('[')
   if bi >= 0:
     let root = part[0 ..< bi]
@@ -130,22 +156,40 @@ proc violations(path: string): seq[string] =
       if not m.isAllowed and m notin result:
         result.add m
 
-proc isAdapterBoxy(path: string): bool =
-  ## The boxy adapter is desktop-only (imports pixie) and explicitly excluded
-  ## from core-purity checks. Match by path prefix.
-  path.replace('\\', '/').contains("dragonbones/adapters/boxy")
+# Build the set of files to check. Core dirs only (adapters import their
+# backends by design and are excluded). Also scan the top-level aggregator.
+let coreBase = (currentSourcePath().parentDir / ".." / "src" / "dragonbones").normalizedPath
+doAssert dirExists(coreBase), "core source dir not found: " & coreBase
 
-let srcDir = currentSourcePath().parentDir / ".." / "src" / "dragonbones"
+var coreFiles: seq[string]
+# Top-level public aggregator
+let topLevel = (coreBase / ".." / "dragonbones.nim").normalizedPath
+if fileExists(topLevel):
+  coreFiles.add topLevel
+# Core subsystem directories only (excludes adapters/)
+for sub in coreModules:
+  let subDir = coreBase / sub
+  if dirExists(subDir):
+    for f in walkDirRec(subDir, yieldFilter = {pcFile}):
+      if f.endsWith(".nim"):
+        coreFiles.add f
 
 suite "core purity":
   test "allowlist behaves correctly":
+    # Named allowed libs
     check isAllowed("bumpy")
     check isAllowed("vmath")
+    # std/*
     check isAllowed("std/strutils")
     check isAllowed("std/os")
+    # Core modules (qualified)
     check isAllowed("dragonbones/model")
     check isAllowed("dragonbones/anim")
     check isAllowed("dragonbones/model/types")    # sub-path of core module
+    # Relative/bare intra-package imports (always in-core)
+    check isAllowed("./types")
+    check isAllowed("../atlas/atlas")
+    # Forbidden
     check not isAllowed("naylib")
     check not isAllowed("boxy")
     check not isAllowed("jsony")                  # blocked until boney-782 clears it
@@ -163,6 +207,11 @@ suite "core purity":
     check "std/strutils" in importsOf("import std/[os, strutils]")
     check "vmath" in importsOf("import vmath")
     check "bumpy" in importsOf("import bumpy")
+    # `except` clause must not produce a false positive
+    check "bumpy" in importsOf("import bumpy except foo")
+    check importsOf("import bumpy except foo") == @["bumpy"]
+    # `include` statements are treated as imports
+    check "dragonbones/model" in importsOf("include dragonbones/model")
 
   test "commented-out imports are not scanned as live code":
     let src = "import bumpy\n#[ import naylib ]#\nimport dragonbones/model\n# import boxy\n"
@@ -174,13 +223,19 @@ suite "core purity":
     check "naylib" notin mods
     check "boxy" notin mods
 
+  test "violations() detects forbidden imports":
+    # Synthetic violation: a core file that imports naylib
+    let tmpFile = getTempDir() / "fake_core_module.nim"
+    writeFile(tmpFile, "import bumpy\nimport naylib\n")
+    let bad = violations(tmpFile)
+    check "naylib" in bad
+    check "bumpy" notin bad
+    removeFile(tmpFile)
+
   test "core dragonbones modules import only bumpy/vmath/std/core":
-    var coreFiles: seq[string]
-    for f in walkDirRec(srcDir, yieldFilter = {pcFile}):
-      if f.endsWith(".nim") and not isAdapterBoxy(f):
-        coreFiles.add f
-    # Pass trivially when no core .nim files exist yet (scaffold phase).
-    # Each file added to src/dragonbones/** (outside adapters/boxy) is checked.
+    if coreFiles.len == 0:
+      checkpoint("WARNING: no core .nim files yet — purity unenforced (scaffold phase)")
+      skip()
     for path in coreFiles:
       let bad = violations(path)
       if bad.len > 0:
