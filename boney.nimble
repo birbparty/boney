@@ -23,3 +23,4 @@ task test, "Run the test suite":
   exec "nim r tests/parse/test_timeline.nim"
   exec "nim r tests/anim/test_sample.nim"
   exec "nim r tests/anim/test_propagate.nim"
+  exec "nim r tests/sampling/test_golden.nim"
