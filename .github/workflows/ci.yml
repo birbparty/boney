@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "ralph/iteration-*"]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Tests (Nim ${{ matrix.nim }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        nim: ["2.2.x", "2.0.x"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Nim
+        uses: jiro4989/setup-nim-action@v2
+        with:
+          nim-version: ${{ matrix.nim }}
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install dependencies
+        run: nimble install -y --depsOnly
+
+      - name: Compile check (entry module)
+        run: nim check src/dragonbones.nim
+
+      - name: Compile check (ARM cross-compile, no SDK required)
+        run: |
+          nim check \
+            --os:linux --cpu:arm --mm:arc \
+            --define:useMalloc --opt:size \
+            src/dragonbones.nim
+
+      - name: Run test suite
+        run: nimble test
