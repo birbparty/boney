@@ -78,7 +78,8 @@ proc findParentIdx(bones: seq[BoneData], parentName: string): int =
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
-proc propagateWorldTransforms*(armData: ArmatureData, bones: var seq[BoneState]) =
+proc propagateWorldTransforms*(armData: ArmatureData, bones: var seq[BoneState],
+                                scratch: var seq[DbTransform]) =
   ## Walk bones in parent-first order and compute localMatrix + worldMatrix for
   ## each bone, honouring the four inherit flags from BoneData.
   ##
@@ -86,14 +87,27 @@ proc propagateWorldTransforms*(armData: ArmatureData, bones: var seq[BoneState])
   ## already set by sampleAnimation (or manually for static poses).
   ## Requires: armData.bones are in parent-before-child order (DragonBones guarantee).
   ##
+  ## scratch is a caller-managed work buffer used to accumulate world DbTransforms
+  ## during the propagation pass. The contract is `scratch.len >= armData.bones.len`:
+  ## pass an empty seq and it grows on the first call; pre-size to the largest armature
+  ## you will ever animate and it is never reallocated again. One shared scratch buffer
+  ## across multiple armatures stays allocation-free as long as it is pre-sized to the
+  ## maximum bone count.
+  ##
+  ## Allocation budget: zero heap allocations per frame when scratch is pre-sized
+  ## to at least armData.bones.len. sampleAnimation and deformMeshVertices are also
+  ## zero-alloc when their var-output buffers are pre-allocated. The full pipeline
+  ## (sampleAnimation → propagateWorldTransforms → sampleFFDOffsets → deformMeshVertices)
+  ## is allocation-free in the steady state.
+  ##
   ## After this call, bones[i].worldMatrix is ready for skinning / rendering.
   doAssert bones.len == armData.bones.len,
     "bones seq must be parallel to armData.bones (got " & $bones.len &
     ", need " & $armData.bones.len & ")"
 
-  # Accumulate world DbTransforms in a parallel array so children can reference
-  # their parent's world components without matrix decomposition.
-  var worldTs = newSeq[DbTransform](armData.bones.len)
+  # Grow scratch if needed; no-op (and no allocation) when already large enough.
+  if scratch.len < armData.bones.len:
+    scratch.setLen(armData.bones.len)
 
   for i in 0 ..< armData.bones.len:
     let boneData = armData.bones[i]
@@ -104,8 +118,8 @@ proc propagateWorldTransforms*(armData: ArmatureData, bones: var seq[BoneState])
       if parentIdx < 0:
         local   # root bone: world IS local
       else:
-        computeWorldTransform(local, boneData, worldTs[parentIdx])
+        computeWorldTransform(local, boneData, scratch[parentIdx])
 
-    worldTs[i]           = worldT
+    scratch[i]           = worldT
     bones[i].localMatrix = dbTransformToMat3(local)
     bones[i].worldMatrix = dbTransformToMat3(worldT)

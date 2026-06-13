@@ -23,6 +23,8 @@ import dragonbones/anim/propagate
 
 const Eps = 1e-4'f32
 
+var propagateScratch: seq[DbTransform]
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 proc approxEq(a, b: float32): bool = abs(a - b) < Eps
@@ -62,7 +64,7 @@ proc go(arm: ArmatureData, anim: AnimationData, t: float32): seq[BoneState] =
   var bones = newSeq[BoneState](arm.bones.len)
   var slots = newSeq[SlotState](arm.slots.len)
   sampleAnimation(anim, arm, t, bones, slots)
-  propagateWorldTransforms(arm, bones)
+  propagateWorldTransforms(arm, bones, propagateScratch)
   bones
 
 # ── Oracle comparison: frames 0, 6, 12, 18 ───────────────────────────────────
@@ -205,7 +207,7 @@ suite "edge cases — empty timelines":
     var bones = newSeq[BoneState](gArm.bones.len)
     var slots  = newSeq[SlotState](gArm.slots.len)
     sampleAnimation(emptyAnim, gArm, 0.0'f32, bones, slots)
-    propagateWorldTransforms(gArm, bones)
+    propagateWorldTransforms(gArm, bones, propagateScratch)
     ## Bones should be finite (not NaN/Inf).
     let v = bones[0].worldMatrix * vec3(0.0'f32, 0.0'f32, 1.0'f32)
     check not isNan(v.x)
