@@ -82,16 +82,31 @@ suite "sampleFFDOffsets — interpolation":
                      0.0'f32, buf)
     check approxEqV(buf[0], vec2(1, 2))
 
-  test "next kf omits vertex: previous value held (no snap to zero)":
-    ## next has fewer vertices than current — use current value as fallback
+  test "next kf omits vertex: uncovered vertex interpolates toward zero":
+    ## next has 1 vertex (offset=0); kf has 2 vertices (offset=0).
+    ## Vertex 1 is covered by kf (5,6) but not by next: next value = vec2(0,0)
+    ## per DragonBones convention (omitted vertex = zero deformation).
     var buf = newOffsets(2)
     sampleFFDOffsets(@[ffdKF(0, 24, 0, @[vec2(3, 4), vec2(5, 6)]),
                        ffdKF(24, 0, 0, @[vec2(7, 8)])],  # only 1 vertex
                      12.0'f32, buf)
     ## buf[0]: lerp (3,4) → (7,8) at t=0.5 → (5,6)
     check approxEqV(buf[0], vec2(5, 6))
-    ## buf[1]: next has no entry for j=1 → fallback = kf.vertices[1] = (5,6); lerp to self = (5,6)
-    check approxEqV(buf[1], vec2(5, 6))
+    ## buf[1]: kf=(5,6), next=vec2(0,0); lerp at t=0.5 → (2.5, 3)
+    check approxEqV(buf[1], vec2(2.5'f32, 3.0'f32))
+
+  test "differing offsets between keyframes: interpolates by absolute vertex index":
+    ## kf covers vertices 0-1 (offset=0), next covers vertices 1-2 (offset=1).
+    ## Vertex 0: kf=(2,0), next=vec2(0,0)  → lerp at t=0.5 → (1,0)
+    ## Vertex 1: kf=(4,0), next=(0,6)      → lerp at t=0.5 → (2,3)
+    ## Vertex 2: kf=vec2(0,0), next=(0,8)  → lerp at t=0.5 → (0,4)
+    var buf = newOffsets(3)
+    sampleFFDOffsets(@[ffdKF(0, 24, 0, @[vec2(2, 0), vec2(4, 0)]),
+                       ffdKF(24, 0, 1, @[vec2(0, 6), vec2(0, 8)])],
+                     12.0'f32, buf)
+    check approxEqV(buf[0], vec2(1, 0))
+    check approxEqV(buf[1], vec2(2, 3))
+    check approxEqV(buf[2], vec2(0, 4))
 
 # ── deformMeshVertices — rigid (non-weighted) ─────────────────────────────────
 
@@ -188,3 +203,9 @@ suite "deformMeshVertices — skinned":
     deformMeshVertices(mesh, newOffsets(2), @[boneWithMatrix(identMat())], buf2)
     check approxEqV(buf2[0], vec2(1, 0))
     check approxEqV(buf2[1], vec2(0, 0))  # no weights → zero
+
+  test "undersized output buffer: doAssert fires":
+    let mesh = rigidMesh(@[vec2(1, 2)])
+    var buf2: seq[Vec2] = @[]
+    expect AssertionDefect:
+      deformMeshVertices(mesh, @[], @[], buf2)
