@@ -2,6 +2,7 @@
 
 > **Status:** Spec finalized. Types live in `src/dragonbones/boundary.nim`.
 > Related: boney-82k (this issue), boney-nkp (naylib adapter), boney-ck0 (boxy adapter).
+> Atlas binding (resolving texture names to handles) is specified in boney-080.
 
 ---
 
@@ -13,49 +14,55 @@ to a specific renderer (naylib/raylib, boxy, or any future backend).
 
 The boundary between core and adapter is defined by two things:
 
-1. An **opaque texture handle** (`TextureHandle`) — the core stores and emits
-   these but never dereferences them; the adapter owns the backing storage.
+1. An **opaque texture handle** (`TextureHandle`) — the adapter issues these at
+   load time; the core never dereferences them.
 2. **Draw commands** — one per visible slot per frame, describing what to draw
    and where in world space.
 
 ---
 
-## Texture handles
+## Texture handle lifecycle
 
 ```nim
-type TextureHandle* = distinct uint32
+type TextureHandle* = distinct uint32  # in src/dragonbones/boundary.nim
+
+const NullTextureHandle* = TextureHandle(0)
+proc isValid*(h: TextureHandle): bool = h != NullTextureHandle
+proc `==`*(a, b: TextureHandle): bool {.borrow.}
 ```
 
-The adapter calls a loader (e.g. `LoadTexture` for raylib, `boxy.addImage` for
-boxy) and gets back a handle. It stores that handle in the `DisplayData` for
-image and mesh slots at load time. The core reads the handle out of
-`DisplayData` and copies it into each `DrawCommand` each frame. The adapter
-reads the handle back at render time and uses it to look up the actual GPU
-resource.
+`TextureHandle` does **not** live in the DragonBones model types (`DragonBonesData`,
+`DisplayData`, etc.). The model is shared across all instances and all adapters;
+baking one adapter's GPU handles into it would break that contract.
 
-`TextureHandle(0)` is the null/invalid sentinel. The core must never emit a
-`DrawCommand` with a null handle (validate at load time; skip or warn at
-render time).
+Instead, handles live in an **atlas binding** (specified by boney-080), a
+per-load structure that maps atlas sub-texture names to `(TextureHandle, Rect)`.
+When the animation system emits a draw command, it resolves the handle from the
+atlas binding using the `DisplayData.name` field, then copies it into the
+`DrawCommand`. The adapter provides the binding when creating an armature
+instance — it is not stored in `DragonBonesData`.
+
+`TextureHandle(0)` / `NullTextureHandle` is the invalid sentinel. The core must
+skip any slot whose resolved handle is not valid.
 
 ---
 
 ## Draw commands
 
-Two draw command shapes are needed — one for quads (image slots) and one for
-meshes. The adapter may support only quads (see console degradation below).
+Two draw command shapes are needed: quads for image slots and meshes for mesh slots.
 
 ```nim
-DrawQuad* = object     # image slot or mesh-degraded-to-quad
+DrawQuad* = object
   texture*: TextureHandle
-  srcRect*: Rect       # atlas sub-rectangle (pixels), used as UV source
-  dstQuad*: array[4, Vec2]  # world-space corners, CCW: TL, BL, BR, TR
+  srcRect*: Rect               # atlas sub-rectangle in PIXELS
+  dstQuad*: array[4, Vec2]     # world-space corners, CCW: TL, BL, BR, TR
   color*: DbColor
   blendMode*: BlendMode
 
-DrawMesh* = object     # deformable mesh slot (desktop-only)
+DrawMesh* = object
   texture*: TextureHandle
-  vertices*: seq[Vec2] # deformed world-space vertex positions (frame output)
-  uvs*: seq[Vec2]      # atlas UV coordinates (static after parse)
+  vertices*: seq[Vec2]         # deformed world-space vertex positions
+  uvs*: seq[Vec2]              # atlas UV coords, NORMALIZED 0–1 (NOT pixels)
   indices*: seq[uint16]
   color*: DbColor
   blendMode*: BlendMode
@@ -63,60 +70,77 @@ DrawMesh* = object     # deformable mesh slot (desktop-only)
 DrawCommandKind* = enum dcQuad, dcMesh
 
 DrawCommand* = object
-  zOrder*: int         # slot z-order (ascending = back to front)
+  zOrder*: int                 # ascending = back to front
   case kind*: DrawCommandKind
   of dcQuad: quad*: DrawQuad
   of dcMesh: mesh*: DrawMesh
 ```
 
+> **UV unit asymmetry**: `DrawQuad.srcRect` is in atlas PIXELS (input to
+> `DrawTexturePro`'s source rect). `DrawMesh.uvs` are normalized 0–1 (input to
+> vertex shaders / `rlVertex` UV). Adapters must not double-normalize either.
+
 The anim module populates a `seq[DrawCommand]` each frame, sorted by `zOrder`.
-The adapter iterates this seq and issues GPU calls.
 
 ---
 
-## Mesh degradation on console
+## Console degradation policy
 
-`DrawTexturePro` (raylib/naylib) can draw a source rectangle to an arbitrary
-destination quad — enough for image slots and skin-weighted quads.
+### What `DrawTexturePro` actually supports
 
-For mesh slots, the 3DS and Vita raylib binding does **not** expose
-`DrawMesh`/`rlVertex`. The chosen degradation policy:
+`DrawTexturePro(texture, source, dest, origin, rotation, tint)` draws a source
+**rectangle** to a destination **rectangle** with a rotation and origin offset.
+It does NOT support an arbitrary 4-corner quad — for that you need `rlVertex`.
 
-| Platform | Mesh slot behavior |
-|---|---|
-| Desktop (naylib) | `DrawMesh` via `rlVertex` → full deformation |
-| 3DS / Vita (`-d:ds3` / `-d:vita`) | `DrawTexturePro` to bounding quad → no per-vertex deformation |
+Implications:
+- **Mesh slots**: always need `rlVertex` for per-vertex deformation. The core
+  always emits `dcMesh`; the adapter chooses whether to use `rlVertex` or degrade.
+- **Skewed image slots** (`skX ≠ skY` in the bone/slot transform): the true
+  world-space shape is a parallelogram, not a rectangle. Rendering requires
+  `rlVertex` for correct output.
 
-The adapter is responsible for the `when defined(ds3) or defined(vita)` branch.
-The core always emits a `dcMesh` command; the adapter decides whether to
-render it as a mesh or degrade to a bounding quad.
+On 3DS and Vita, the naylib binding exposes `DrawTexturePro` but not `rlVertex`
+in its initial form. The chosen degradation policy:
 
-**Why core always emits dcMesh and lets the adapter degrade:**
+| Slot type | Desktop (naylib) | 3DS / Vita (`-d:ds3` / `-d:vita`) |
+|---|---|---|
+| Image (non-skewed) | `DrawTexturePro` — correct ✅ | `DrawTexturePro` — correct ✅ |
+| Image (skewed) | `rlVertex` for exact quad | AABB approx → visible skew error ⚠️ |
+| Mesh | `rlVertex` → full deformation | AABB approx → bounding quad ⚠️ |
+
+The adapter computes the AABB from `DrawMesh.vertices` (or `DrawQuad.dstQuad`)
+for the console degradation path. Both degraded cases use the same mechanism:
+convert 4 world-space corners to an axis-aligned bounding rect, then call
+`DrawTexturePro`. Rotated (non-skewed) slots remain pixel-exact.
+
+### Why core always emits dcMesh
+
 - Simpler core: no compile-time branching in the animation pipeline
-- Future-proof: a console adapter with rlVertex support (or a custom mesh path)
-  can opt in without touching core
-- The degraded quad is computed from `DrawMesh.vertices` bounding box — no
-  extra data required
+- Future-proof: a console adapter with `rlVertex` support opts in without
+  touching core
+- The bounding-quad approximation requires no extra data from the core
 
 ---
 
-## Loader interface (convenience)
+## Loader interface (adapter-layer, not core)
 
-The canonical loader signature accepted by all adapters:
+The `loadArmature` convenience function lives in each adapter package (not in
+`src/dragonbones/`), because loading requires renderer-specific calls. The
+typical signature:
 
 ```nim
+# In the adapter package (e.g. naylib adapter)
 proc loadArmature*(
-  skeletonJson: string,          ## path to _ske.json
-  atlasJson: string,             ## path to _tex.json
+  skeletonJson: string,           ## path to _ske.json
+  atlasJson: string,              ## path to _tex.json
   loadTexture: proc(path: string): TextureHandle,
-): DragonBonesData
+): tuple[data: DragonBonesData, atlas: AtlasBinding]
 ```
 
-`loadTexture` is an adapter-supplied callback. The core calls it once per atlas
-entry, caches the handles in the relevant `DisplayData` records, and never
-touches the texture again. On console, `path` is a ROM path (e.g.
-`romfs:/textures/hero.png`); on desktop it may be a filesystem path. The
-adapter is free to use a texture cache and deduplicate.
+`DragonBonesData` is returned unmodified (no handles stored in it). The atlas
+binding (defined in boney-080) is a separate per-load structure that maps
+sub-texture names to `(TextureHandle, Rect)`. Multiple adapters can load the
+same `DragonBonesData` independently, each with their own `AtlasBinding`.
 
 ---
 
@@ -124,8 +148,7 @@ adapter is free to use a texture cache and deduplicate.
 
 - Decode PNG/JPEG/other image formats
 - Upload textures to the GPU
-- Know about specific renderer resource handles (`Texture2D`, raylib `Image`,
-  boxy image key)
+- Store `TextureHandle` values inside `DragonBonesData` or `DisplayData`
 - Draw anything — the core only produces `DrawCommand` values
 
 ---
@@ -139,4 +162,5 @@ adapter is free to use a texture cache and deduplicate.
 | `src/dragonbones/adapters/boxy/boxy.nim` | boxy adapter (boney-ck0, desktop-only) |
 
 `boundary.nim` imports only `vmath`, `bumpy`, and `dragonbones/model` — it is
-part of the core and subject to the core purity check.
+part of the core and **is** subject to the core purity check (scanned by
+`tests/test_core_purity.nim` via the flat-file walk added in this iteration).

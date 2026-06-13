@@ -10,15 +10,24 @@ import dragonbones/model/model
 
 type
   ## Opaque GPU-resource identifier issued by the adapter at load time.
-  ## The core copies handles from DisplayData into DrawCommands each frame.
-  ## TextureHandle(0) is the null/invalid sentinel.
+  ## At frame emit time, the anim module resolves the handle from the atlas
+  ## binding and copies it into DrawCommands. The core never dereferences it.
+  ## NullTextureHandle is the invalid sentinel.
   TextureHandle* = distinct uint32
 
+const NullTextureHandle* = TextureHandle(0)
+
+proc `==`*(a, b: TextureHandle): bool {.borrow.}
+proc isValid*(h: TextureHandle): bool = h != NullTextureHandle
+
+type
   ## Draw command for an image slot or a mesh slot degraded to a bounding quad.
   ## dstQuad corners are in world space, counter-clockwise: TL, BL, BR, TR.
+  ## NOTE: srcRect is in PIXELS (atlas pixel coordinates).
+  ##       DrawMesh.uvs are normalized 0-1. Adapters must not double-normalize.
   DrawQuad* = object
     texture*: TextureHandle
-    srcRect*: Rect                ## atlas sub-rectangle in pixels
+    srcRect*: Rect                ## atlas sub-rectangle in PIXELS
     dstQuad*: array[4, Vec2]      ## world-space corners
     color*: DbColor
     blendMode*: BlendMode
@@ -29,7 +38,7 @@ type
   DrawMesh* = object
     texture*: TextureHandle
     vertices*: seq[Vec2]          ## deformed world-space vertex positions
-    uvs*: seq[Vec2]               ## atlas UV coordinates (static after parse)
+    uvs*: seq[Vec2]               ## atlas UV coords, NORMALIZED 0–1 (not pixels)
     indices*: seq[uint16]
     color*: DbColor
     blendMode*: BlendMode
