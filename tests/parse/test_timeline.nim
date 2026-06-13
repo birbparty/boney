@@ -508,3 +508,136 @@ suite "timeline parser — fixture integration":
     check tl.rotateKFs[0].base.curve.kind == tkLinear
     check tl.rotateKFs[1].base.frame    == 24
     check tl.rotateKFs[1].rotate        == 90.0'f32
+
+# ── Event keyframe parsing (toEventKeyframes) ─────────────────────────────────
+
+suite "timeline parser — event keyframes":
+
+  proc oneAnimEvent(frameJson: string): string =
+    ## Minimal animation with a "frame" event timeline.
+    oneAnim(anim0(extraFields = """"frame":""" & frameJson))
+
+  test "empty frame array yields no eventKFs":
+    let anim = oneAnimEvent("[]").parseDragonBones().armatures[0].animations[0]
+    check anim.eventKFs.len == 0
+
+  test "frame entry with no events/sounds/actions is skipped":
+    ## A frame entry with only a duration (no events/sounds/actions) contributes
+    ## to accumulated position but does not produce an EventKeyframe.
+    let json = oneAnimEvent("""[{"duration":5}]""")
+    let anim = json.parseDragonBones().armatures[0].animations[0]
+    check anim.eventKFs.len == 0
+
+  test "single frame event at frame 0":
+    let json = oneAnimEvent("""[{"duration":0,"events":[{"name":"hit","bone":"weapon"}]}]""")
+    let anim = json.parseDragonBones().armatures[0].animations[0]
+    check anim.eventKFs.len == 1
+    check anim.eventKFs[0].frame == 0
+    check anim.eventKFs[0].frameEvents.len == 1
+    check anim.eventKFs[0].frameEvents[0].name == "hit"
+    check anim.eventKFs[0].frameEvents[0].boneName == "weapon"
+
+  test "accumulated frame positions are computed from duration fields":
+    ## Frame entries: dur=5 (no events), dur=3 (event), dur=4 (event).
+    ## → EventKeyframes at frames 5 and 8.
+    let json = oneAnimEvent(
+      """[{"duration":5},""" &
+      """{"duration":3,"events":[{"name":"a"}]},""" &
+      """{"duration":4,"events":[{"name":"b"}]}]""")
+    let anim = json.parseDragonBones().armatures[0].animations[0]
+    check anim.eventKFs.len == 2
+    check anim.eventKFs[0].frame == 5
+    check anim.eventKFs[0].frameEvents[0].name == "a"
+    check anim.eventKFs[1].frame == 8
+    check anim.eventKFs[1].frameEvents[0].name == "b"
+
+  test "sound event is parsed into soundEvents":
+    ## A single entry starts at frame 0; duration=2 is the keyframe's span.
+    let json = oneAnimEvent("""[{"duration":2,"sounds":[{"name":"bang.wav"}]}]""")
+    let anim = json.parseDragonBones().armatures[0].animations[0]
+    check anim.eventKFs.len == 1
+    check anim.eventKFs[0].frame == 0
+    check anim.eventKFs[0].soundEvents.len == 1
+    check anim.eventKFs[0].soundEvents[0].name == "bang.wav"
+
+  test "action with gotoAndPlay is parsed into actionEvents":
+    let json = oneAnimEvent("""[{"duration":4,"actions":[{"gotoAndPlay":"idle"}]}]""")
+    let anim = json.parseDragonBones().armatures[0].animations[0]
+    check anim.eventKFs.len == 1
+    check anim.eventKFs[0].actionEvents[0].name == "idle"
+
+  test "action with name (DB 5.x) is parsed when gotoAndPlay absent":
+    let json = oneAnimEvent("""[{"duration":6,"actions":[{"name":"run"}]}]""")
+    let anim = json.parseDragonBones().armatures[0].animations[0]
+    check anim.eventKFs.len == 1
+    check anim.eventKFs[0].actionEvents[0].name == "run"
+
+  test "gotoAndPlay takes priority over name when both present":
+    let json = oneAnimEvent("""[{"duration":1,"actions":[{"gotoAndPlay":"pref","name":"fallback"}]}]""")
+    let anim = json.parseDragonBones().armatures[0].animations[0]
+    check anim.eventKFs[0].actionEvents[0].name == "pref"
+
+  test "action with neither gotoAndPlay nor name is dropped":
+    let json = oneAnimEvent("""[{"duration":1,"actions":[{}]}]""")
+    let anim = json.parseDragonBones().armatures[0].animations[0]
+    ## The frame entry exists but has no valid actions — eventKFs should be empty.
+    check anim.eventKFs.len == 0
+
+  test "mixed events/sounds/actions in one keyframe":
+    ## Single entry starts at frame 0; duration=10 is the keyframe's span.
+    let json = oneAnimEvent(
+      """[{"duration":10,""" &
+      """"events":[{"name":"fx"}],""" &
+      """"sounds":[{"name":"woosh.wav"}],""" &
+      """"actions":[{"gotoAndPlay":"idle"}]}]""")
+    let anim = json.parseDragonBones().armatures[0].animations[0]
+    check anim.eventKFs.len == 1
+    let kf = anim.eventKFs[0]
+    check kf.frame == 0
+    check kf.frameEvents.len  == 1
+    check kf.soundEvents.len  == 1
+    check kf.actionEvents.len == 1
+
+  test "FrameEventData int/float/string payloads are parsed":
+    let json = oneAnimEvent(
+      """[{"duration":0,"events":[{"name":"data","bone":"arm",""" &
+      """"ints":[1,2],"floats":[0.5],"strings":["left"]}]}]""")
+    let anim = json.parseDragonBones().armatures[0].animations[0]
+    check anim.eventKFs.len == 1
+    let ev = anim.eventKFs[0].frameEvents[0]
+    check ev.boneName == "arm"
+    check ev.ints    == @[1, 2]
+    check ev.floats  == @[0.5'f32]
+    check ev.strings == @["left"]
+
+# ── defaultActions parsing ────────────────────────────────────────────────────
+
+suite "armature parser — defaultActions":
+
+  proc armatureWithActions(actionsJson: string): string =
+    minimalFile(
+      """[{"type":"Armature","name":"A","frameRate":24,""" &
+      """"bone":[],"slot":[],"ik":[],"animation":[],""" &
+      """"defaultActions":""" & actionsJson & "}]")
+
+  test "absent defaultActions yields empty seq":
+    let json = minimalFile(
+      """[{"type":"Armature","name":"A","frameRate":24,""" &
+      """"bone":[],"slot":[],"ik":[],"animation":[]}]""")
+    let arm = json.parseDragonBones().armatures[0]
+    check arm.defaultActions.len == 0
+
+  test "single gotoAndPlay is parsed":
+    let arm = armatureWithActions("""[{"gotoAndPlay":"idle"}]""")
+              .parseDragonBones().armatures[0]
+    check arm.defaultActions == @["idle"]
+
+  test "multiple defaultActions are all collected":
+    let arm = armatureWithActions("""[{"gotoAndPlay":"idle"},{"gotoAndPlay":"walk"}]""")
+              .parseDragonBones().armatures[0]
+    check arm.defaultActions == @["idle", "walk"]
+
+  test "empty gotoAndPlay string is filtered out":
+    let arm = armatureWithActions("""[{"gotoAndPlay":""},{"gotoAndPlay":"run"}]""")
+              .parseDragonBones().armatures[0]
+    check arm.defaultActions == @["run"]

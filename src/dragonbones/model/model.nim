@@ -225,6 +225,41 @@ type
     of tlIK:            ikKFs*:        seq[IKKeyframe]
     of tlZOrder:        zOrderKFs*:    seq[ZOrderKeyframe]
 
+# ── Event / sound / action types ─────────────────────────────────────────────
+
+type
+  EventKind* = enum
+    ekFrame, ekSound, ekAction
+
+  FrameEventData* = object
+    name*:    string
+    boneName*: string            ## "" = not bone-specific
+    ints*:    seq[int]
+    floats*:  seq[float32]
+    strings*: seq[string]
+
+  SoundEventData* = object
+    name*: string
+
+  ActionEventData* = object
+    name*:    string             ## animation name to play
+    boneName*: string            ## "" = self; else = target slot for child armature
+
+  ## One point in the animation-level event timeline. Multiple event types can
+  ## share the same frame; all are collected when the frame is crossed.
+  EventKeyframe* = object
+    frame*:        int
+    frameEvents*:  seq[FrameEventData]
+    soundEvents*:  seq[SoundEventData]
+    actionEvents*: seq[ActionEventData]
+
+  ## A single dispatched event produced by collectEvents.
+  AnimEvent* = object
+    case kind*: EventKind
+    of ekFrame:  frameData*:  FrameEventData
+    of ekSound:  soundData*:  SoundEventData
+    of ekAction: actionData*: ActionEventData
+
 # ── Animation data ────────────────────────────────────────────────────────────
 
 type
@@ -234,6 +269,7 @@ type
     playTimes*: int                     ## 0 = loop forever
     fadeInTime*: float32
     timelines*: seq[Timeline]
+    eventKFs*: seq[EventKeyframe]       ## animation-level event/sound/action keyframes
 
 # ── Armature data ─────────────────────────────────────────────────────────────
 

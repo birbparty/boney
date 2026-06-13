@@ -67,6 +67,9 @@ type
     chain: int                    ## absent → 0 (end-effector only)
     weight: Option[float32]       ## absent → 1.0
 
+  RawDefaultAction = object
+    gotoAndPlay: string           ## DB 4.x / 5.x: animation name to auto-play on load
+
   RawArmature = object
     armatureType: string          ## JSON "type", renamed via renameHook; absent → "Armature"
     frameRate: int                ## absent → 0; caller inherits from top-level
@@ -77,6 +80,7 @@ type
     skin: seq[RawSkin]
     ik: seq[RawIK]
     animation: seq[RawAnimation]  ## populated by timeline.nim
+    defaultActions: seq[RawDefaultAction]  ## absent → empty
     ## isGlobal (DragonBones 4.x armature flag) is intentionally ignored;
     ## 5.x files omit it and use per-bone inherit* flags instead.
 
@@ -173,7 +177,7 @@ proc toArmatureData(r: RawArmature, topFrameRate: int): ArmatureData =
                skins: parseSkins(r.skin),
                animations: parseAnimations(r.animation),
                ikConstraints: r.ik.mapIt(it.toIKConstraintData()),
-               defaultActions: @[])
+               defaultActions: r.defaultActions.mapIt(it.gotoAndPlay).filterIt(it.len > 0))
 
 # ── Public API ─────────────────────────────────────────────────────────────────
 
