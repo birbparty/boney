@@ -17,8 +17,14 @@ import dragonbones/parse/timeline
 type BoolOrInt = distinct int
 
 proc parseHook(s: string, i: var int, v: var BoolOrInt) =
+  ## Accepts JSON boolean (true/false), integer (0/1), or string ("true"/"false"/"0"/"1").
+  ## DragonBones 4.x writes bendPositive as "false" (quoted string).
   while i < s.len and s[i] in {' ', '\t', '\n', '\r'}: inc i
-  if i < s.len and s[i] in {'t', 'f'}:
+  if i < s.len and s[i] == '"':
+    var str: string
+    parseHook(s, i, str)
+    v = BoolOrInt(if str in ["true", "1"]: 1 else: 0)
+  elif i < s.len and s[i] in {'t', 'f'}:
     var b: bool
     parseHook(s, i, b)
     v = BoolOrInt(if b: 1 else: 0)
