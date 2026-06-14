@@ -2,6 +2,9 @@ nimcache/
 nimblecache/
 htmldocs/
 
+# Compiled test binaries
+tests/**/test_*
+
 # Beads / Dolt files (added by bd init)
 .dolt/
 *.db
