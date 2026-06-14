@@ -132,9 +132,15 @@ proc buildSubTexture(raw: RawSubTexture, atlasW, atlasH: float32): AtlasSubTextu
 proc parseAtlas*(json: string): AtlasData =
   ## Parse a DragonBones 5.x texture atlas JSON string into AtlasData.
   ## UV and quad geometry are precomputed for every subtexture.
+  ## When the root width/height fields are absent (DragonBones 5.5 variant),
+  ## atlas dimensions are inferred from the maximum subtexture extent.
   let raw = json.fromJson(RawAtlas)
   let scale = raw.scale.get(1.0'f32)
-  let aW = raw.width; let aH = raw.height
+  var aW = raw.width; var aH = raw.height
+  if aW == 0 or aH == 0:
+    for s in raw.subTexture:
+      aW = max(aW, s.x + s.width)
+      aH = max(aH, s.y + s.height)
   doAssert aW > 0 and aH > 0,
     "atlas width/height must be > 0 (got " & $aW & " × " & $aH & ")"
   var subs: seq[AtlasSubTexture]

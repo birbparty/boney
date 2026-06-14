@@ -10,6 +10,23 @@ import dragonbones/model/model
 import dragonbones/parse/slot
 import dragonbones/parse/timeline
 
+# ── Bool/int compatibility hook ────────────────────────────────────────────────
+## DragonBones 5.5 encodes inheritance flags as JSON booleans (false/true).
+## DragonBones 5.7 uses integers (0/1). This hook accepts both.
+
+type BoolOrInt = distinct int
+
+proc parseHook(s: string, i: var int, v: var BoolOrInt) =
+  while i < s.len and s[i] in {' ', '\t', '\n', '\r'}: inc i
+  if i < s.len and s[i] in {'t', 'f'}:
+    var b: bool
+    parseHook(s, i, b)
+    v = BoolOrInt(if b: 1 else: 0)
+  else:
+    var n: int
+    parseHook(s, i, n)
+    v = BoolOrInt(n)
+
 # ── Wire types (private, mirror DragonBones JSON structure) ───────────────────
 
 type
@@ -46,10 +63,10 @@ type
     parent: string                ## JSON "parent" → BoneData.parentName; "" for root
     length: float32
     transform: Option[RawTransform]
-    inheritTranslation: Option[int]  ## absent → 1 (true)
-    inheritRotation: Option[int]     ## absent → 1 (true)
-    inheritScale: Option[int]        ## absent → 1 (true)
-    inheritReflection: Option[int]   ## absent → 1 (true)
+    inheritTranslation: Option[BoolOrInt]  ## absent → 1; 5.5=bool, 5.7=int
+    inheritRotation: Option[BoolOrInt]
+    inheritScale: Option[BoolOrInt]
+    inheritReflection: Option[BoolOrInt]
 
   RawSlot = object
     name: string
@@ -63,7 +80,7 @@ type
     order: int
     bone: string                  ## JSON "bone" → IKConstraintData.boneName
     target: string                ## JSON "target" → IKConstraintData.targetName
-    bendPositive: Option[int]     ## absent → 1 (true)
+    bendPositive: Option[BoolOrInt]  ## absent → 1; 5.5=bool, 5.7=int
     chain: int                    ## absent → 0 (end-effector only)
     weight: Option[float32]       ## absent → 1.0
 
@@ -142,10 +159,10 @@ proc toBoneData(r: RawBone): BoneData =
            parentName: r.parent,
            length: r.length,
            transform: r.transform.toDbTransform(),
-           inheritTranslation: r.inheritTranslation.get(1) != 0,
-           inheritRotation:    r.inheritRotation.get(1) != 0,
-           inheritScale:       r.inheritScale.get(1) != 0,
-           inheritReflection:  r.inheritReflection.get(1) != 0)
+           inheritTranslation: r.inheritTranslation.get(BoolOrInt(1)).int != 0,
+           inheritRotation:    r.inheritRotation.get(BoolOrInt(1)).int != 0,
+           inheritScale:       r.inheritScale.get(BoolOrInt(1)).int != 0,
+           inheritReflection:  r.inheritReflection.get(BoolOrInt(1)).int != 0)
 
 proc toSlotData(r: RawSlot): SlotData =
   SlotData(name: r.name,
@@ -159,7 +176,7 @@ proc toIKConstraintData(r: RawIK): IKConstraintData =
                    order: r.order,
                    boneName: r.bone,
                    targetName: r.target,
-                   bendPositive: r.bendPositive.get(1) != 0,
+                   bendPositive: r.bendPositive.get(BoolOrInt(1)).int != 0,
                    chain: r.chain,
                    weight: r.weight.get(1.0'f32))
 
