@@ -14,7 +14,7 @@
 ## The texture is generated at runtime (solid checkerboard) so no PNG asset is
 ## required. Swap in your own texture by replacing the genImageChecked block.
 
-import std/[os, tables]
+import std/os
 import raylib
 import rlgl
 import vmath
@@ -79,15 +79,18 @@ proc main() =
   let numY = max(1'i32, int32(atlasData.height) div 16)
   let img  = genImageChecked(int32(atlasData.width), int32(atlasData.height),
                               numX, numY, LIGHTGRAY, GRAY)
-  let tex  = loadTextureFromImage(img)
+  var tex  = loadTextureFromImage(img)
   ## img is a stack value; no unload call needed (naylib does not export it).
 
-  # One TextureHandle for the whole atlas; the adapter maps it to a Texture2D.
+  # Texture2D is move-only (naylib RAII). Box it on the heap so the lookup
+  # can return a stable ptr without triggering =dup.
+  type TexBox = ref object
+    v: Texture2D
+  let box = TexBox(v: move(tex))
   let atlasHandle = TextureHandle(1)
-  let textures    = {atlasHandle: tex}.toTable
 
-  proc lookupTex(h: TextureHandle): Texture2D =
-    textures.getOrDefault(h)
+  proc lookupTex(h: TextureHandle): ptr Texture2D =
+    if h == atlasHandle: addr(box.v) else: nil
 
   # ── Per-frame animation state ──────────────────────────────────────────────
   var bones       = newSeq[BoneState](armData.bones.len)

@@ -42,7 +42,7 @@ proc toRaylibBlendMode(bm: model.BlendMode): raylib.BlendMode {.inline.} =
 
 when not (defined(ds3) or defined(vita)):
 
-  proc renderQuadDesktop(q: DrawQuad, tex: Texture2D) =
+  proc renderQuadDesktop(q: DrawQuad, tex: ptr Texture2D) =
     ## Render a DrawQuad via rlVertex (2 CW triangles: TL,TR,BR and TL,BR,BL).
     ## Corner order: [0]=TL [1]=TR [2]=BR [3]=BL, matching AtlasSubTexture.quadVerts.
     let tint = toRaylibColor(q.color)
@@ -60,7 +60,7 @@ when not (defined(ds3) or defined(vita)):
     rlEnd()
     setTexture(0)
 
-  proc renderMeshDesktop(m: DrawMesh, tex: Texture2D) =
+  proc renderMeshDesktop(m: DrawMesh, tex: ptr Texture2D) =
     ## Render a DrawMesh via rlVertex (arbitrary triangle soup).
     if m.uvs.len < m.vertices.len: return  # mismatched parallel arrays — skip safely
     let tint = toRaylibColor(m.color)
@@ -98,7 +98,7 @@ else:  # ds3 or vita
     let angle = arctan2(dy, dx) * (180.0'f32 / PI)
     (x: tl.x, y: tl.y, w: w, h: h, angle: angle)
 
-  proc renderQuadConsole(q: DrawQuad, tex: Texture2D) =
+  proc renderQuadConsole(q: DrawQuad, tex: ptr Texture2D) =
     # Atlas-rotated sprites require swapping src dims and fixing the rotation pivot,
     # which DrawTexturePro (origin=(0,0)) cannot do correctly. Enforce non-rotation
     # so the constraint is caught at dev time. Export atlases with rotation disabled
@@ -109,9 +109,9 @@ else:  # ds3 or vita
     let src = Rectangle(x: q.srcRect.x, y: q.srcRect.y,
                          width: q.srcRect.w, height: q.srcRect.h)
     let dst = Rectangle(x: px, y: py, width: pw, height: ph)
-    drawTexture(tex, src, dst, Vector2(x: 0, y: 0), baseAngle, tint)
+    drawTexture(tex[], src, dst, Vector2(x: 0, y: 0), baseAngle, tint)
 
-  proc renderMeshConsole(m: DrawMesh, tex: Texture2D) =
+  proc renderMeshConsole(m: DrawMesh, tex: ptr Texture2D) =
     ## Console mesh degradation: render the world-space bounding box as a quad,
     ## sampling only the UV sub-region that the mesh actually covers in the atlas.
     if m.vertices.len == 0 or m.uvs.len == 0: return
@@ -135,18 +135,19 @@ else:  # ds3 or vita
     let src = Rectangle(x: minU * tw, y: minV * th,
                          width: (maxU - minU) * tw, height: (maxV - minV) * th)
     let dst = Rectangle(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
-    drawTexture(tex, src, dst, Vector2(x: 0, y: 0), 0.0'f32, tint)
+    drawTexture(tex[], src, dst, Vector2(x: 0, y: 0), 0.0'f32, tint)
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
 proc renderDrawCommands*(cmds: seq[DrawCommand],
-                          lookup: proc(h: TextureHandle): Texture2D) =
+                          lookup: proc(h: TextureHandle): ptr Texture2D) =
   ## Render all DrawCommands in order (back→front as produced by emitDrawCommands).
-  ## lookup: maps a TextureHandle to a naylib Texture2D.
+  ## lookup: maps a TextureHandle to a borrowed ptr Texture2D (nil → skip command).
   for cmd in cmds:
     case cmd.kind
     of dcQuad:
       let tex = lookup(cmd.quad.texture)
+      if tex == nil: continue
       let bm = toRaylibBlendMode(cmd.quad.blendMode)
       blendMode(bm):
         when not (defined(ds3) or defined(vita)):
@@ -155,6 +156,7 @@ proc renderDrawCommands*(cmds: seq[DrawCommand],
           renderQuadConsole(cmd.quad, tex)
     of dcMesh:
       let tex = lookup(cmd.mesh.texture)
+      if tex == nil: continue
       let bm = toRaylibBlendMode(cmd.mesh.blendMode)
       blendMode(bm):
         when not (defined(ds3) or defined(vita)):
