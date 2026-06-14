@@ -32,7 +32,7 @@ import dragonbones/anim/propagate
 import dragonbones/anim/draworder
 import dragonbones/anim/emit
 import dragonbones/boundary
-import dragonbones/adapters/boxy/adapter as boxyAdapter
+import dragonbones/adapters/boxy/adapter
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
 
@@ -53,7 +53,7 @@ const
 proc makePlaceholderAtlas(w, h: int): Image =
   ## Solid-colour placeholder so sub-sprites register into boxy without a PNG.
   ## Replace with readImage("dragon_tex.png") once you have the real file.
-  ## The rendered skeleton will show as monochrome — that is expected.
+  ## The rendered skeleton will show as solid cornflower blue — that is expected.
   result = newImage(w, h)
   result.fill(rgba(100, 149, 237, 255))  ## cornflower blue
 
@@ -66,9 +66,11 @@ proc main() =
 
   doAssert dbData.armatures.len > 0, "skeleton JSON has no armatures"
   let armData = dbData.armatures[0]          ## "Dragon"
+  doAssert armData.skins.len > 0, "armature has no skins"
   let skin    = armData.skins[0]             ## default skin
 
   # Pick "idle" animation; fall back to the first one.
+  doAssert armData.animations.len > 0, "armature has no animations"
   var animIdx = 0
   for i, anim in armData.animations:
     if anim.name == "idle": animIdx = i; break
@@ -129,7 +131,7 @@ proc main() =
 
     # ── Time delta ────────────────────────────────────────────────────────────
     let now = epochTime()
-    let dt  = float32(now - prevTime)
+    let dt  = min(float32(now - prevTime), 0.1'f32)
     prevTime = now
     elapsedSecs += dt
     if animDurSecs > 0: elapsedSecs = elapsedSecs mod animDurSecs
