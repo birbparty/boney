@@ -50,26 +50,35 @@ proc composeWorld(localMat, parentWorldMat: Mat3,
     if not boneData.inheritTranslation:
       result[2, 0] = local.x
       result[2, 1] = local.y
-  else:
-    # Non-default: selectively inherit rotation and/or scale in DbTransform space
-    # (safe here because the LINEAR part is independent per-axis), then transform
-    # translation through the parent matrix.
-    var modT = local   # start from local; adjust rotation/scale per flags
-    if boneData.inheritRotation:    # inherit rotation but NOT scale
-      modT.skX = parentWorld.skX + local.skX
-      modT.skY = parentWorld.skY + local.skY
-      # scX/scY stay as local.scX/scY
-    elif boneData.inheritScale:     # inherit scale but NOT rotation
-      modT.scX = parentWorld.scX * local.scX
-      modT.scY = parentWorld.scY * local.scY
-      # skX/skY stay as local.skX/skY
-    # else: neither — use local rotation+scale as-is (modT == local already)
-
+  elif boneData.inheritScale:
+    # Inherit scale but not rotation: pre-cancel parent rotation before the
+    # matrix product so DragonBones' concat leaves the child at local rotation.
+    var adj = local
+    adj.skY -= parentWorld.skY
+    adj.skX -= parentWorld.skY
+    result = parentWorldMat * dbTransformToMat3(adj)
+    if not boneData.inheritTranslation:
+      result[2, 0] = local.x
+      result[2, 1] = local.y
+  elif boneData.inheritRotation:
+    # Inherit rotation but not scale. Rotation is skY; skX shifts by the same
+    # parent rotation to preserve the child's local skew (skX - skY).
+    var modT = local
+    modT.skY = parentWorld.skY + local.skY
+    modT.skX = parentWorld.skY + local.skX
     result = dbTransformToMat3(modT)
-
-    # Translation: transform child's local origin through the parent world matrix
-    # (parent translates and rotates/scales the attachment point, even when the
-    # child's own rotation/scale is not inherited from the parent).
+    if boneData.inheritTranslation:
+      result[2, 0] = parentWorldMat[0,0]*local.x + parentWorldMat[1,0]*local.y +
+                     parentWorldMat[2,0]
+      result[2, 1] = parentWorldMat[0,1]*local.x + parentWorldMat[1,1]*local.y +
+                     parentWorldMat[2,1]
+    else:
+      result[2, 0] = local.x
+      result[2, 1] = local.y
+  else:
+    # Inherit neither rotation nor scale; only the child's attachment point may
+    # move through the parent transform.
+    result = localMat
     if boneData.inheritTranslation:
       result[2, 0] = parentWorldMat[0,0]*local.x + parentWorldMat[1,0]*local.y +
                      parentWorldMat[2,0]

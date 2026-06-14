@@ -23,6 +23,7 @@ task test, "Run the test suite":
   exec "nim r tests/parse/test_timeline.nim"
   exec "nim r tests/anim/test_sample.nim"
   exec "nim r tests/anim/test_propagate.nim"
+  exec "nim r tests/anim/test_propagate_inherit.nim"
   exec "nim r tests/anim/test_mesh.nim"
   exec "nim r tests/anim/test_draworder.nim"
   exec "nim r tests/anim/test_blend.nim"
