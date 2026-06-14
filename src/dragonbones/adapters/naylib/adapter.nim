@@ -1,8 +1,10 @@
 ## Naylib/raylib adapter for boney DrawCommands.
 ##
 ## Render path selection:
-##   Desktop (default): rlBegin/rlVertex for both quads and meshes.
+##   Desktop (default): rlBegin(RL_QUADS)/rlVertex for both quads and meshes.
 ##     Uses setTexture (rlSetTexture) to bind into the rlgl batch renderer.
+##     RL_QUADS is mandatory — the rlgl batch silently drops RL_TRIANGLES
+##     geometry (mesh triangles are emitted as degenerate quads).
 ##     uvQuad handles atlas rotation transparently.
 ##   Console (-d:ds3 or -d:vita): DrawTexturePro for quads; mesh slots degrade
 ##     to a bounding-box DrawTexturePro sampling only the mesh's UV sub-region.
@@ -43,29 +45,49 @@ proc toRaylibBlendMode(bm: model.BlendMode): raylib.BlendMode {.inline.} =
 when not (defined(ds3) or defined(vita)):
 
   proc renderQuadDesktop(q: DrawQuad, tex: ptr Texture2D) =
-    ## Render a DrawQuad via rlVertex (2 CW triangles: TL,TR,BR and TL,BR,BL).
-    ## Corner order: [0]=TL [1]=TR [2]=BR [3]=BL, matching AtlasSubTexture.quadVerts.
+    ## Render a DrawQuad via rlVertex as a single RL_QUADS primitive (4 verts).
+    ##
+    ## IMPORTANT: rlgl's default render batch only rasterizes RL_QUADS for
+    ## textured geometry — it builds an element/index buffer (glDrawElements,
+    ## 6 indices per 4 verts) sized for quads. RL_TRIANGLES geometry submitted
+    ## through the same batch is silently dropped (no visible pixels), which is
+    ## why every raylib texture helper (DrawTexturePro etc.) feeds RL_QUADS.
+    ## Submit corners in TL → BL → BR → TR winding to match that index layout.
+    ##
+    ## Corner order in q: [0]=TL [1]=TR [2]=BR [3]=BL, matching
+    ## AtlasSubTexture.quadVerts. uvQuad handles atlas rotation transparently.
     let tint = toRaylibColor(q.color)
     setTexture(tex.id)  # rlSetTexture — registers texture with the rlgl batch renderer
-    rlBegin(DrawMode.Triangles)
+    rlBegin(DrawMode.Quads)
     color4ub(tint.r, tint.g, tint.b, tint.a)
-    # Triangle 1: TL(0), TR(1), BR(2)
-    texCoord2f(q.uvQuad[0].x, q.uvQuad[0].y); vertex2f(q.dstQuad[0].x, q.dstQuad[0].y)
-    texCoord2f(q.uvQuad[1].x, q.uvQuad[1].y); vertex2f(q.dstQuad[1].x, q.dstQuad[1].y)
-    texCoord2f(q.uvQuad[2].x, q.uvQuad[2].y); vertex2f(q.dstQuad[2].x, q.dstQuad[2].y)
-    # Triangle 2: TL(0), BR(2), BL(3)
-    texCoord2f(q.uvQuad[0].x, q.uvQuad[0].y); vertex2f(q.dstQuad[0].x, q.dstQuad[0].y)
-    texCoord2f(q.uvQuad[2].x, q.uvQuad[2].y); vertex2f(q.dstQuad[2].x, q.dstQuad[2].y)
-    texCoord2f(q.uvQuad[3].x, q.uvQuad[3].y); vertex2f(q.dstQuad[3].x, q.dstQuad[3].y)
+    texCoord2f(q.uvQuad[0].x, q.uvQuad[0].y); vertex2f(q.dstQuad[0].x, q.dstQuad[0].y)  # TL
+    texCoord2f(q.uvQuad[3].x, q.uvQuad[3].y); vertex2f(q.dstQuad[3].x, q.dstQuad[3].y)  # BL
+    texCoord2f(q.uvQuad[2].x, q.uvQuad[2].y); vertex2f(q.dstQuad[2].x, q.dstQuad[2].y)  # BR
+    texCoord2f(q.uvQuad[1].x, q.uvQuad[1].y); vertex2f(q.dstQuad[1].x, q.dstQuad[1].y)  # TR
     rlEnd()
     setTexture(0)
 
   proc renderMeshDesktop(m: DrawMesh, tex: ptr Texture2D) =
-    ## Render a DrawMesh via rlVertex (arbitrary triangle soup).
+    ## Render a DrawMesh (arbitrary indexed triangle soup) via rlVertex.
+    ##
+    ## rlgl's default batch only rasterizes RL_QUADS (see renderQuadDesktop),
+    ## so each source triangle is emitted as a degenerate quad. rlgl's quad
+    ## index buffer maps the 4 verts to triangles (0,1,2) and (0,2,3); the
+    ## 4th vert duplicates the 3rd, so the second triangle is degenerate
+    ## (zero area) and only the real triangle rasterizes.
+    ##
+    ## Culling: raylib's default batch leaves GL_CULL_FACE enabled, and a
+    ## DragonBones mesh's natural triangle winding faces away from the camera
+    ## (verified empirically — natural-order triangles render zero pixels with
+    ## culling on, full coverage with it off). Rather than reverse the winding
+    ## (which would silently drop any triangle of the opposite winding in a
+    ## mixed-winding mesh), disable backface culling for the mesh draw so it is
+    ## winding-agnostic, then restore the default afterward.
     if m.uvs.len < m.vertices.len: return  # mismatched parallel arrays — skip safely
     let tint = toRaylibColor(m.color)
     setTexture(tex.id)  # rlSetTexture — registers texture with the rlgl batch renderer
-    rlBegin(DrawMode.Triangles)
+    disableBackfaceCulling()
+    rlBegin(DrawMode.Quads)
     color4ub(tint.r, tint.g, tint.b, tint.a)
     var ti = 0
     while ti + 2 < m.indices.len:
@@ -74,11 +96,18 @@ when not (defined(ds3) or defined(vita)):
       let ic = m.indices[ti + 2].int
       if ia < m.vertices.len and ib < m.vertices.len and ic < m.vertices.len and
          ia < m.uvs.len and ib < m.uvs.len and ic < m.uvs.len:
+        # Natural winding (ia, ib, ic) + 4th vert duplicating the last.
         texCoord2f(m.uvs[ia].x, m.uvs[ia].y); vertex2f(m.vertices[ia].x, m.vertices[ia].y)
         texCoord2f(m.uvs[ib].x, m.uvs[ib].y); vertex2f(m.vertices[ib].x, m.vertices[ib].y)
         texCoord2f(m.uvs[ic].x, m.uvs[ic].y); vertex2f(m.vertices[ic].x, m.vertices[ic].y)
+        texCoord2f(m.uvs[ic].x, m.uvs[ic].y); vertex2f(m.vertices[ic].x, m.vertices[ic].y)
       ti += 3
     rlEnd()
+    # Flush the mesh batch while culling is still disabled, then restore the
+    # default so it doesn't leak into subsequent draws (the batch only applies
+    # cull state at flush time).
+    drawRenderBatchActive()
+    enableBackfaceCulling()
     setTexture(0)
 
 # ── Console path (DrawTexturePro) ─────────────────────────────────────────────
