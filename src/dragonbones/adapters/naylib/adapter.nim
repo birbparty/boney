@@ -15,11 +15,11 @@
 ##   # ... emitDrawCommands into cmds ...
 ##   renderDrawCommands(cmds, proc(h: TextureHandle): Texture2D = myTextures[h.int])
 
-import std/math
 import vmath
 import raylib
 import rlgl
 import dragonbones/boundary
+import dragonbones/model/model
 
 # ── Color conversion ──────────────────────────────────────────────────────────
 
@@ -30,7 +30,7 @@ proc toRaylibColor(c: DbColor): Color {.inline.} =
     b: uint8(clamp(c.bM * 255.0'f32 + c.bO, 0.0'f32, 255.0'f32)),
     a: uint8(clamp(c.aM * 255.0'f32 + c.aO, 0.0'f32, 255.0'f32)))
 
-proc toRaylibBlendMode(bm: BlendMode): raylib.BlendMode {.inline.} =
+proc toRaylibBlendMode(bm: model.BlendMode): raylib.BlendMode {.inline.} =
   case bm
   of bmNormal:   raylib.BlendMode.Alpha
   of bmAdd:      raylib.BlendMode.Additive
