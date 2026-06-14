@@ -102,7 +102,9 @@ proc emitDrawCommands*(
 
     of dkMesh:
       let meshData = display.mesh
-      let n = meshData.vertices.len
+      let n =
+        if meshData.vertexWeights.len > 0: meshData.vertexWeights.len
+        else: meshData.vertices.len
       if n == 0: continue
       if meshScratch.len < n: meshScratch.setLen(n)
       let ffd = if si < ffdOffsets.len: ffdOffsets[si] else: newSeq[Vec2]()

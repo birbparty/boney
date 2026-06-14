@@ -82,10 +82,12 @@ type
   BoundingBoxShape* = enum
     bbsRectangle, bbsEllipse, bbsPolygon
 
-  ## One (boneIndex, weight) entry for a weighted mesh vertex.
+  ## One skinned-mesh influence. localPos is the vertex position transformed
+  ## into this bone's bind-pose local space during JSON parse.
   VertexWeight* = object
     boneIndex*: uint16
     weight*: float32
+    localPos*: Vec2
 
   ## Mesh display: vertices/UVs/triangles + optional per-vertex bone weights.
   ## vertexWeights[i] holds the weights for vertices[i]; empty seq = non-weighted.

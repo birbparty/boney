@@ -2,11 +2,11 @@
 ##
 ## Two distinct code paths (per boney-o6v):
 ##   Rigid FFD:  output[i] = base[i] + interpolated_ffd_offset[i]
-##   Skinned:    output[i] = sum_j( w_j * boneJ.worldMatrix * (base[i] + ffd_i) )
+##   Skinned:    output[i] = sum_j( w_j * boneJ.worldMatrix * bindLocalPos_j )
 ##
 ## Both paths accept pre-allocated output buffers to avoid per-frame allocation
-## (boney-d0d). Callers must resize buffers to mesh.vertices.len once, then
-## reuse them each frame.
+## (boney-d0d). Callers must resize buffers to the deform vertex count once,
+## then reuse them each frame.
 ##
 ## Pipeline: sampleAnimation → propagateWorldTransforms → deformMeshVertices → render
 
@@ -59,43 +59,40 @@ proc sampleFFDOffsets*(kfs: seq[FFDKeyframe], frame: float32,
 proc deformMeshVertices*(mesh: MeshData, ffdOffsets: seq[Vec2],
                           bones: seq[BoneState], output: var seq[Vec2]) =
   ## Apply FFD offsets and optional linear blend skinning, writing results into
-  ## output. output must be pre-allocated to mesh.vertices.len.
+  ## output. output must be pre-allocated to the mesh vertex count.
   ##
   ## Non-weighted path (empty vertexWeights): output[i] = mesh.vertices[i] + ffdOffsets[i].
   ##
   ## Skinned path: output[i] = sum over vertexWeights[i]:
-  ##   weight * (bones[boneIndex].worldMatrix * vec3(v + ffd, 1)).xy
+  ##   weight * (bones[boneIndex].worldMatrix * vec3(localPos, 1)).xy
   ## Bone world matrices must be current (call propagateWorldTransforms first).
   ## Out-of-range bone indices are silently skipped (contributes 0 for that weight).
   ## Vertices with empty or all-out-of-range weight lists collapse to (0, 0).
   ##
-  ## Note: the skinned path operates on a single pre-bind-pose vertex position
-  ## (base + FFD). It does not carry per-bone local coordinates, so it is
-  ## equivalent to true LBS only when influencing bones share a common bind frame.
+  ## Skinned-mesh FFD is not applied here. DragonBones indexes skinned FFD data
+  ## per influence, while this API currently receives per-vertex offsets.
   ##
-  ## ffdOffsets should be length mesh.vertices.len; indices past the end are
-  ## treated as zero offset (no FFD contribution for that vertex).
+  ## For non-skinned meshes, ffdOffsets should be length mesh.vertices.len;
+  ## indices past the end are treated as zero offset.
 
-  let n = mesh.vertices.len
+  let weighted = mesh.vertexWeights.len > 0
+  let n = if weighted: mesh.vertexWeights.len else: mesh.vertices.len
   doAssert output.len >= n,
-    "output must be pre-allocated to at least mesh.vertices.len (got " &
+    "output must be pre-allocated to at least the mesh vertex count (got " &
     $output.len & ", need " & $n & ")"
 
-  if mesh.vertexWeights.len == 0:
+  if not weighted:
     for i in 0 ..< n:
       let v = mesh.vertices[i]
       let o = if i < ffdOffsets.len: ffdOffsets[i] else: vec2(0, 0)
       output[i] = vec2(v.x + o.x, v.y + o.y)
   else:
     for i in 0 ..< n:
-      let v = mesh.vertices[i]
-      let o = if i < ffdOffsets.len: ffdOffsets[i] else: vec2(0, 0)
-      let vi = vec3(v.x + o.x, v.y + o.y, 1.0'f32)
       var wx = 0.0'f32; var wy = 0.0'f32
-      if i < mesh.vertexWeights.len:
-        for wt in mesh.vertexWeights[i]:
-          if int(wt.boneIndex) < bones.len:
-            let wv = bones[wt.boneIndex].worldMatrix * vi
-            wx += wt.weight * wv.x
-            wy += wt.weight * wv.y
+      for wt in mesh.vertexWeights[i]:
+        if int(wt.boneIndex) < bones.len:
+          let vi = vec3(wt.localPos.x, wt.localPos.y, 1.0'f32)
+          let wv = bones[wt.boneIndex].worldMatrix * vi
+          wx += wt.weight * wv.x
+          wy += wt.weight * wv.y
       output[i] = vec2(wx, wy)

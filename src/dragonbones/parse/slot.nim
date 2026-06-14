@@ -52,8 +52,10 @@ type
     vertices*: seq[float32]
     uvs*: seq[float32]                 ## normalized 0–1 flat pairs
     triangles*: seq[int]               ## triangle indices; values must fit uint16 (< 65536)
-    ## Skinned-mesh weight data (packed: count,boneLocalIdx,w,boneLocalIdx,w,...)
+    ## Skinned-mesh weight data (packed JSON: count,boneLocalIdx,w,boneLocalIdx,w,...)
     weights*: seq[float32]
+    ## Slot bind matrix: [a, b, c, d, tx, ty].
+    slotPose*: seq[float32]
     ## Bone pose matrices: [globalBoneIdx, a, b, c, d, tx, ty, ...] per bone
     bonePose*: seq[float32]
     ## Bounding-box sub-shape: "rectangle" | "ellipse" | "polygon"
@@ -81,20 +83,47 @@ proc pairsToVec2(flat: seq[float32]): seq[Vec2] =
   for i in 0 ..< n:
     result[i] = vec2(flat[i * 2], flat[i * 2 + 1])
 
+proc affineToMat3(flat: seq[float32], offset: int, hasIndex: bool): Mat3 =
+  ## DragonBones stores affine matrices as [a,b,c,d,tx,ty], optionally preceded
+  ## by a bone index. vmath Mat3 constructor is column-major.
+  let base = offset + (if hasIndex: 1 else: 0)
+  if base + 5 >= flat.len:
+    return mat3()
+  mat3(flat[base], flat[base + 1], 0.0'f32,
+       flat[base + 2], flat[base + 3], 0.0'f32,
+       flat[base + 4], flat[base + 5], 1.0'f32)
+
+proc transformPoint(m: Mat3, p: Vec2): Vec2 {.inline.} =
+  let r = m * vec3(p.x, p.y, 1.0'f32)
+  vec2(r.x, r.y)
+
+proc inverseOrIdentity(m: Mat3): Mat3 =
+  if abs(determinant(m)) > 1e-6'f32: inverse(m)
+  else: mat3()
+
 proc parseVertexWeights(weights: seq[float32], bonePose: seq[float32],
+                        slotPose: seq[float32], vertices: seq[Vec2],
                         vertexCount: int): seq[seq[VertexWeight]] =
   ## Unpack DragonBones packed weight array into per-vertex VertexWeight lists.
   ## weights[] encoding per vertex: [numInfluences, localIdx, w, localIdx, w, ...]
   ## bonePose[] encoding: [globalBoneIdx, a, b, c, d, tx, ty, ...] (BonePoseStride floats)
-  ## The affine columns (a,b,c,d,tx,ty) encode the bind-pose matrix; only globalBoneIdx
-  ## is extracted here — bind-pose matrix resolution happens in the skeleton/pose layer.
+  ## DragonBones resolves bind-pose compensation during parse: each raw vertex is
+  ## transformed by slotPose, then by the inverse bind matrix for each influence.
+  ## Rendering can then use sum(weight * currentBoneWorld * localPos).
   ## Returns empty seq for non-skinned meshes (weights.len == 0).
   if weights.len == 0: return @[]
   let boneCount = bonePose.len div BonePoseStride
+  let slotMat = affineToMat3(slotPose, 0, false)
+  var invBind = newSeq[Mat3](boneCount)
+  for bi in 0 ..< boneCount:
+    invBind[bi] = inverseOrIdentity(affineToMat3(bonePose, bi * BonePoseStride,
+                                                 true))
   result = newSeq[seq[VertexWeight]](vertexCount)
   var i = 0
   for v in 0 ..< vertexCount:
     if i >= weights.len: break
+    let baseVertex = if v < vertices.len: vertices[v] else: vec2(0, 0)
+    let bindVertex = transformPoint(slotMat, baseVertex)
     let count = int(weights[i])
     inc i
     result[v] = newSeq[VertexWeight](count)
@@ -108,7 +137,9 @@ proc parseVertexWeights(weights: seq[float32], bonePose: seq[float32],
         ## Malformed weight stream: drop this influence rather than panic.
         continue
       let globalIdx = uint16(int(bonePose[localIdx * BonePoseStride]))
-      result[v][written] = VertexWeight(boneIndex: globalIdx, weight: w)
+      let localPos = transformPoint(invBind[localIdx], bindVertex)
+      result[v][written] = VertexWeight(boneIndex: globalIdx, weight: w,
+                                        localPos: localPos)
       inc written
     result[v].setLen(written)
 
@@ -147,7 +178,8 @@ proc toDisplayData(d: RawDisplayItem): DisplayData =
     let vertexCount =
       if d.weights.len > 0 and uvs.len > 0: uvs.len
       else: verts.len
-    let wts = parseVertexWeights(d.weights, d.bonePose, vertexCount)
+    let wts = parseVertexWeights(d.weights, d.bonePose, d.slotPose, verts,
+                                 vertexCount)
     DisplayData(name: d.name, transform: transform, kind: dkMesh,
                 mesh: MeshData(width: d.width, height: d.height,
                                vertices: verts, uvs: uvs, indices: indices,

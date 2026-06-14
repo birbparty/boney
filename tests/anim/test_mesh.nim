@@ -22,8 +22,8 @@ proc ffdKF(frame, duration, offset: int, verts: seq[Vec2]): FFDKeyframe =
 
 proc rigidMesh(verts: seq[Vec2]): MeshData = MeshData(vertices: verts)
 
-proc wt(boneIdx: int, w: float32): VertexWeight =
-  VertexWeight(boneIndex: uint16(boneIdx), weight: w)
+proc wt(boneIdx: int, w: float32, localPos: Vec2): VertexWeight =
+  VertexWeight(boneIndex: uint16(boneIdx), weight: w, localPos: localPos)
 
 proc skinnedMesh(verts: seq[Vec2], wts: seq[seq[VertexWeight]]): MeshData =
   MeshData(vertices: verts, vertexWeights: wts)
@@ -144,47 +144,55 @@ suite "deformMeshVertices — rigid":
 suite "deformMeshVertices — skinned":
 
   test "single bone weight=1.0, identity world: vertex unchanged":
-    let mesh = skinnedMesh(@[vec2(1, 2)], @[@[wt(0, 1.0'f32)]])
+    let mesh = skinnedMesh(@[vec2(1, 2)], @[@[wt(0, 1.0'f32, vec2(1, 2))]])
     var buf2 = newBuf(1)
     deformMeshVertices(mesh, newOffsets(1), @[boneWithMatrix(identMat())], buf2)
     check approxEqV(buf2[0], vec2(1, 2))
 
   test "single bone weight=1.0, translate (10, 5): vertex translated":
-    let mesh = skinnedMesh(@[vec2(1, 2)], @[@[wt(0, 1.0'f32)]])
+    let mesh = skinnedMesh(@[vec2(1, 2)], @[@[wt(0, 1.0'f32, vec2(1, 2))]])
     var buf2 = newBuf(1)
     deformMeshVertices(mesh, newOffsets(1),
                        @[boneWithMatrix(translateMat(10, 5))], buf2)
     check approxEqV(buf2[0], vec2(11, 7))
 
-  test "two bones equal weight: vertex is average of both transforms":
-    ## bone0 translates by (0, 4): maps (2,0) → (2,4)
-    ## bone1 is identity: maps (2,0) → (2,0)
-    ## weight 0.5 each → average (2, 2)
-    let mesh = skinnedMesh(@[vec2(2, 0)],
-                            @[@[wt(0, 0.5'f32), wt(1, 0.5'f32)]])
+  test "single bone with non-identity bind uses stored bone-local position":
+    ## Bind pose was translate(20,0), so authored world-bind vertex (30,0)
+    ## was parsed to localPos (10,0). Moving the bone to (50,0) yields (60,0).
+    let mesh = skinnedMesh(@[vec2(30, 0)], @[@[wt(0, 1.0'f32, vec2(10, 0))]])
     var buf2 = newBuf(1)
     deformMeshVertices(mesh, newOffsets(1),
-                       @[boneWithMatrix(translateMat(0, 4)),
-                         boneWithMatrix(identMat())], buf2)
-    check approxEqV(buf2[0], vec2(2, 2))
+                       @[boneWithMatrix(translateMat(50, 0))], buf2)
+    check approxEqV(buf2[0], vec2(60, 0))
 
-  test "skinned + FFD: FFD offset applied before skinning":
-    ## vertex (0,0) + ffd (1,0) → (1,0); bone translates by (0,10) → (1,10)
-    let mesh = skinnedMesh(@[vec2(0, 0)], @[@[wt(0, 1.0'f32)]])
+  test "two bones equal weight: vertex is average of both transforms":
+    ## Both influences have bind-local origin. Current bones move to (0,100)
+    ## and (100,0); weight 0.5 each -> average (50,50).
+    let mesh = skinnedMesh(@[vec2(2, 0)],
+                            @[@[wt(0, 0.5'f32, vec2(0, 0)),
+                                wt(1, 0.5'f32, vec2(0, 0))]])
+    var buf2 = newBuf(1)
+    deformMeshVertices(mesh, newOffsets(1),
+                       @[boneWithMatrix(translateMat(0, 100)),
+                         boneWithMatrix(translateMat(100, 0))], buf2)
+    check approxEqV(buf2[0], vec2(50, 50))
+
+  test "skinned FFD offsets are ignored until per-influence FFD is supported":
+    let mesh = skinnedMesh(@[vec2(0, 0)], @[@[wt(0, 1.0'f32, vec2(0, 0))]])
     var buf2 = newBuf(1)
     deformMeshVertices(mesh, @[vec2(1, 0)],
                        @[boneWithMatrix(translateMat(0, 10))], buf2)
-    check approxEqV(buf2[0], vec2(1, 10))
+    check approxEqV(buf2[0], vec2(0, 10))
 
   test "zero-weight contribution: no influence on result":
-    let mesh = skinnedMesh(@[vec2(5, 5)], @[@[wt(0, 0.0'f32)]])
+    let mesh = skinnedMesh(@[vec2(5, 5)], @[@[wt(0, 0.0'f32, vec2(5, 5))]])
     var buf2 = newBuf(1)
     deformMeshVertices(mesh, newOffsets(1),
                        @[boneWithMatrix(translateMat(100, 100))], buf2)
     check approxEqV(buf2[0], vec2(0, 0))  # weight=0 → no contribution
 
   test "out-of-range bone index: contribution silently skipped":
-    let mesh = skinnedMesh(@[vec2(3, 4)], @[@[wt(99, 1.0'f32)]])
+    let mesh = skinnedMesh(@[vec2(3, 4)], @[@[wt(99, 1.0'f32, vec2(3, 4))]])
     var buf2 = newBuf(1)
     deformMeshVertices(mesh, newOffsets(1), @[boneWithMatrix(identMat())], buf2)
     check approxEqV(buf2[0], vec2(0, 0))  # boneIndex 99 >= bones.len (1) → skipped
@@ -195,14 +203,21 @@ suite "deformMeshVertices — skinned":
     deformMeshVertices(mesh, newOffsets(1), @[], buf2)
     check approxEqV(buf2[0], vec2(0, 0))
 
-  test "vertexWeights shorter than vertices: extra verts get zero":
-    ## mesh has 2 vertices but only 1 weight entry — second vertex has no weights
+  test "vertexWeights length defines skinned output count":
+    ## Skinned output is driven by parsed weighted vertices, not base vertices.
     let mesh = skinnedMesh(@[vec2(1, 0), vec2(2, 0)],
-                            @[@[wt(0, 1.0'f32)]])  # only covers vertex 0
+                            @[@[wt(0, 1.0'f32, vec2(1, 0))]])  # only covers vertex 0
     var buf2 = newBuf(2)
     deformMeshVertices(mesh, newOffsets(2), @[boneWithMatrix(identMat())], buf2)
     check approxEqV(buf2[0], vec2(1, 0))
-    check approxEqV(buf2[1], vec2(0, 0))  # no weights → zero
+
+  test "skinned mesh can deform without base vertices":
+    let mesh = MeshData(uvs: @[vec2(0, 0)], vertexWeights: @[
+      @[wt(0, 1.0'f32, vec2(10, 0))]
+    ])
+    var buf2 = newBuf(1)
+    deformMeshVertices(mesh, @[], @[boneWithMatrix(translateMat(50, 0))], buf2)
+    check approxEqV(buf2[0], vec2(60, 0))
 
   test "undersized output buffer: doAssert fires":
     let mesh = rigidMesh(@[vec2(1, 2)])

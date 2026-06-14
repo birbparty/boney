@@ -4,7 +4,12 @@ import dragonbones/model/model
 import dragonbones/parse/armature
 import dragonbones/parse/slot
 
+const Eps = 1e-4'f32
+
 # ── Helpers ────────────────────────────────────────────────────────────────────
+
+proc approxEq(a, b: float32): bool = abs(a - b) < Eps
+proc approxEqV(a, b: Vec2): bool = approxEq(a.x, b.x) and approxEq(a.y, b.y)
 
 proc withSkin(skinJson: string): string =
   ## Minimal DragonBones JSON with one armature containing the given skin array.
@@ -181,12 +186,40 @@ suite "slot/skin parser — mesh display":
     check wts[0].len == 1
     check wts[0][0].boneIndex == 3'u16
     check wts[0][0].weight    == 1.0'f32
+    check approxEqV(wts[0][0].localPos, vec2(0, 0))
     # vertex 1: two influences — global 3 and 7
     check wts[1].len == 2
     check wts[1][0].boneIndex == 3'u16
     check wts[1][0].weight    == 0.5'f32
+    check approxEqV(wts[1][0].localPos, vec2(1, 0))
     check wts[1][1].boneIndex == 7'u16
     check wts[1][1].weight    == 0.5'f32
+    check approxEqV(wts[1][1].localPos, vec2(1, 0))
+
+  test "skinned mesh computes bone-local positions from bonePose":
+    let d = oneSkin(oneSlot(
+      """[{"type":"mesh","name":"m","width":0,"height":0,
+          "vertices":[30,0],
+          "uvs":[0,0],
+          "triangles":[0,0,0],
+          "weights":[1,0,1.0],
+          "bonePose":[5,1,0,0,1,20,0]}]"""
+    )).arm().skins[0].slots[0].displays[0]
+    let wt = d.mesh.vertexWeights[0][0]
+    check wt.boneIndex == 5'u16
+    check approxEqV(wt.localPos, vec2(10, 0))
+
+  test "skinned mesh includes slotPose before bone-local conversion":
+    let d = oneSkin(oneSlot(
+      """[{"type":"mesh","name":"m","width":0,"height":0,
+          "vertices":[10,0],
+          "uvs":[0,0],
+          "triangles":[0,0,0],
+          "weights":[1,0,1.0],
+          "slotPose":[1,0,0,1,20,0],
+          "bonePose":[5,1,0,0,1,25,0]}]"""
+    )).arm().skins[0].slots[0].displays[0]
+    check approxEqV(d.mesh.vertexWeights[0][0].localPos, vec2(5, 0))
 
   test "weighted mesh with empty vertices uses UV count for vertexCount":
     ## Real DragonBones weighted meshes may omit vertex positions (geometry
@@ -203,8 +236,10 @@ suite "slot/skin parser — mesh display":
     check d.mesh.vertexWeights.len == 2
     check d.mesh.vertexWeights[0][0].boneIndex == 5'u16
     check d.mesh.vertexWeights[0][0].weight    == 1.0'f32
+    check approxEqV(d.mesh.vertexWeights[0][0].localPos, vec2(0, 0))
     check d.mesh.vertexWeights[1][0].boneIndex == 5'u16
     check d.mesh.vertexWeights[1][0].weight    == 0.8'f32
+    check approxEqV(d.mesh.vertexWeights[1][0].localPos, vec2(0, 0))
 
   test "out-of-range localIdx in bonePose is silently dropped (no IndexDefect)":
     ## localIdx=99 is out of bounds for a bonePose with 1 entry (index 0 only).
@@ -221,6 +256,7 @@ suite "slot/skin parser — mesh display":
     check d.mesh.vertexWeights[0].len == 1
     check d.mesh.vertexWeights[0][0].boneIndex == 1'u16
     check d.mesh.vertexWeights[0][0].weight    == 0.5'f32
+    check approxEqV(d.mesh.vertexWeights[0][0].localPos, vec2(0, 0))
 
 # ── Armature display ───────────────────────────────────────────────────────────
 

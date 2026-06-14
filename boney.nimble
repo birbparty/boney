@@ -25,6 +25,7 @@ task test, "Run the test suite":
   exec "nim r tests/anim/test_propagate.nim"
   exec "nim r tests/anim/test_propagate_inherit.nim"
   exec "nim r tests/anim/test_mesh.nim"
+  exec "nim r tests/anim/test_mesh_skinning.nim"
   exec "nim r tests/anim/test_draworder.nim"
   exec "nim r tests/anim/test_blend.nim"
   exec "nim r tests/anim/test_emit.nim"
