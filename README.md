@@ -47,15 +47,23 @@ var meshScratch: seq[Vec2]
 var elapsed     = 0.0'f32
 let duration    = float32(animData.duration) / float32(armData.frameRate)
 
-## 4. Game loop
+## 4. Find zOrder timeline once (absent for simple skeletons — pass empty seq)
+var zOrderKFs: seq[ZOrderKeyframe]
+for tl in animData.timelines:
+  if tl.kind == tlZOrder:
+    zOrderKFs = tl.zOrderKFs
+    break
+
+const screenW = 800; const screenH = 600   ## window dimensions
+initWindow(screenW, screenH, "boney")
+
+## 5. Game loop
 while not windowShouldClose():
   elapsed = (elapsed + getFrameTime()) mod duration
 
   ## Animate
   sampleAnimation(animData, armData, elapsed, bones, slots)
   propagateWorldTransforms(armData, bones, scratch)
-
-  var zOrderKFs: seq[ZOrderKeyframe]   ## populate from animation timelines
   sampleDrawOrder(zOrderKFs, elapsed * float32(armData.frameRate),
                   armData.slots.len, drawOrd, zScratch)
   emitDrawCommands(armData, armData.skins[0], atlasData, atlasHnd,
@@ -64,7 +72,8 @@ while not windowShouldClose():
   ## Render
   beginDrawing()
   clearBackground(RAYWHITE)
-  pushMatrix(); translatef(400, 300, 0)   ## offset to screen center
+  ## Offset skeleton origin to screen center (800×600 window)
+  pushMatrix(); translatef(float32(screenW div 2), float32(screenH div 2), 0)
   renderDrawCommands(drawCmds, lookupTex)
   popMatrix()
   endDrawing()
@@ -180,6 +189,15 @@ proc loadAtlas(path: string): TextureHandle =
 ```
 
 `TextureHandle(0)` is the invalid sentinel (`NullTextureHandle`). Skip any slot whose handle is zero.
+
+---
+
+## Further reading
+
+- [`docs/drawcommand-format.md`](docs/drawcommand-format.md) — full DrawCommand / DbColor / BlendMode reference
+- [`docs/naylib-adapter-guide.md`](docs/naylib-adapter-guide.md) — naylib setup, blend modes, console limits
+- [`docs/boxy-adapter-guide.md`](docs/boxy-adapter-guide.md) — boxy setup, mesh degradation, skew limitation
+- [`docs/console-cross-compile.md`](docs/console-cross-compile.md) — 3DS/Vita build flags, memory model, what changes on console
 
 ---
 

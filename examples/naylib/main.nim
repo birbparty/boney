@@ -1,6 +1,6 @@
 ## boney naylib example — DragonBones skeletal animation with raylib.
 ##
-## Loads the bundled oracle_sample fixture, plays the "idle" animation, and
+## Loads the bundled dragon fixture, plays the "idle" animation, and
 ## renders it via the naylib adapter.
 ##
 ## Rendering path selection:
@@ -8,8 +8,8 @@
 ##   Console  (-d:ds3 or -d:vita): DrawTexturePro for quads; meshes degrade to
 ##   a bounding-box quad sampling the UV sub-region.
 ##
-## Build:
-##   nim r --path:../../src examples/naylib/main.nim
+## Build (from repo root):
+##   nim r examples/naylib/main.nim
 ##
 ## The texture is generated at runtime (solid checkerboard) so no PNG asset is
 ## required. Swap in your own texture by replacing the genImageChecked block.
@@ -73,7 +73,8 @@ proc main() =
 
   # ── Texture ────────────────────────────────────────────────────────────────
   # Checkerboard placeholder — no real atlas PNG required.
-  # Replace with loadImage("oracle_sample.png") once you have the file.
+  # Replace with loadImage("dragon_tex.png") once you have the real texture.
+  # Note: the checkerboard will not resemble the actual artwork — that's expected.
   let numX = max(1'i32, int32(atlasData.width) div 16)
   let numY = max(1'i32, int32(atlasData.height) div 16)
   let img  = genImageChecked(int32(atlasData.width), int32(atlasData.height),
@@ -106,7 +107,10 @@ proc main() =
       break
 
   var elapsedSecs = 0.0'f32
-  let animDurSecs = float32(animData.duration) / float32(armData.frameRate)
+  let animDurSecs =
+    if armData.frameRate > 0:
+      float32(animData.duration) / float32(armData.frameRate)
+    else: 0.0'f32
 
   # ── Game loop ──────────────────────────────────────────────────────────────
   while not windowShouldClose():
