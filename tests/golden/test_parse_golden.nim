@@ -240,11 +240,11 @@ suite "golden — atlas root_img (non-rotated, no trim)":
   test "UV BL is (0/256, 32/128)":
     check approxEqV(sub.quadUVs[3], vec2(0.0'f32, 32.0'f32/128))
 
-  test "quad TL is (0, 0)":
-    check approxEqV(sub.quadVerts[0], vec2(0, 0))
+  test "quad TL centered: fW=64, fH=32, no trim → pivot=(32,16) → TL=(-32,-16)":
+    check approxEqV(sub.quadVerts[0], vec2(-32, -16))
 
-  test "quad BR is (64, 32)":
-    check approxEqV(sub.quadVerts[2], vec2(64, 32))
+  test "quad BR centered: → (32, 16)":
+    check approxEqV(sub.quadVerts[2], vec2(32, 16))
 
 # ── Atlas subtexture: arm_img (rotated, trimmed) ──────────────────────────────
 
@@ -266,12 +266,12 @@ suite "golden — atlas arm_img (rotated, trimmed)":
     check sub.frameWidth == 54
     check sub.frameHeight == 52
 
-  # Rotated: atlas w=32,h=50 → visW=50 (original width), visH=32
-  test "quad TL is (−frameX, −frameY) = (2, 1)":
-    check approxEqV(sub.quadVerts[0], vec2(2, 1))
+  # Rotated: atlas w=32,h=50 → visW=50, visH=32; pivot=(0.5*54+(-2), 0.5*52+(-1))=(25,25)
+  test "quad TL centered with trim: pivot=(25,25) → TL=(-25,-25)":
+    check approxEqV(sub.quadVerts[0], vec2(-25, -25))
 
-  test "quad BR is (2+visW, 1+visH) = (52, 33)  [visW=50, visH=32]":
-    check approxEqV(sub.quadVerts[2], vec2(52, 33))
+  test "quad BR centered: TL+visW/visH = (25, 7)  [visW=50, visH=32]":
+    check approxEqV(sub.quadVerts[2], vec2(25, 7))
 
   # UV: x=64, y=0, w=32, h=50 → u0=64/256=0.25, v0=0, u1=96/256=0.375, v1=50/128
   test "UV TL (sprite TL → atlas BL): (u0, v1) = (0.25, 50/128)":

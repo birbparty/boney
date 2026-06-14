@@ -12,9 +12,10 @@
 ##
 ## Coordinate conventions:
 ##   UV: (0,0) = top-left of atlas, (1,1) = bottom-right
-##   Quad verts: origin at top-left of the original (untrimmed) frame;
-##     frameWidth × frameHeight gives the full sprite bounding box;
-##     visible content occupies [−frameX, −frameX+visW] × [−frameY, −frameY+visH]
+##   Quad verts: origin at the DragonBones default pivot (0.5, 0.5 of the original
+##     untrimmed frame = frame center). This aligns with the bone attachment point.
+##     Visible content occupies [−pivX, −pivX+visW] × [−pivY, −pivY+visH] where
+##     pivX = 0.5*frameWidth + frameX, pivY = 0.5*frameHeight + frameY.
 
 import std/options
 import std/math
@@ -100,10 +101,14 @@ proc buildSubTexture(raw: RawSubTexture, atlasW, atlasH: float32): AtlasSubTextu
   let u0 = px / atlasW;          let v0 = py / atlasH
   let u1 = (px + pw) / atlasW;   let v1 = (py + ph) / atlasH
 
-  ## Quad vertices in sprite-local space (origin = TL of original frame).
-  ## Visible content begins at (−fX, −fY) and spans visW × visH.
-  let qx0 = float32(-fX);        let qy0 = float32(-fY)
-  let qx1 = float32(-fX) + visW; let qy1 = float32(-fY) + visH
+  ## Quad vertices in sprite-local space centered on the DragonBones default pivot
+  ## (0.5, 0.5 of the original untrimmed frame = frame center at local origin).
+  ## pivot in visible-texture space: pivX = 0.5*frameWidth + frameX
+  ## (frameX ≤ 0 = left trim, so pivX < 0.5*frameWidth).
+  let pivX = float32(fW) * 0.5'f32 + float32(fX)
+  let pivY = float32(fH) * 0.5'f32 + float32(fY)
+  let qx0 = -pivX;        let qy0 = -pivY
+  let qx1 = -pivX + visW; let qy1 = -pivY + visH
 
   let vTL = vec2(qx0, qy0); let vTR = vec2(qx1, qy0)
   let vBR = vec2(qx1, qy1); let vBL = vec2(qx0, qy1)

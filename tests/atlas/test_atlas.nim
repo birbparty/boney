@@ -115,13 +115,15 @@ suite "parseAtlas — non-rotated, no trim":
     let s = findSub(parseAtlas(baseAtlas), "body")
     check approxEqV(s.quadUVs[3], vec2(0.0'f32 / atlasW, 64.0'f32 / atlasH))
 
-  test "quad TL at (0, 0) with no trim":
+  test "quad TL centered: no trim → (−visW/2, −visH/2)":
+    ## body: fW=128, fH=64, fX=0, fY=0 → pivot=(64,32) → TL=(-64,-32)
     let s = findSub(parseAtlas(baseAtlas), "body")
-    check approxEqV(s.quadVerts[0], vec2(0, 0))
+    check approxEqV(s.quadVerts[0], vec2(-64, -32))
 
-  test "quad BR at (visW, visH) with no trim":
+  test "quad BR centered: no trim → (visW/2, visH/2)":
+    ## body: BR = (64, 32)
     let s = findSub(parseAtlas(baseAtlas), "body")
-    check approxEqV(s.quadVerts[2], vec2(128, 64))
+    check approxEqV(s.quadVerts[2], vec2(64, 32))
 
 # ── Non-rotated subtexture, with trim ────────────────────────────────────────
 
@@ -137,18 +139,20 @@ suite "parseAtlas — non-rotated, with trim":
     check s.frameWidth  == 72
     check s.frameHeight == 100
 
-  test "quad TL offset by −frameX, −frameY":
-    ## arm: frameX=−4 → visible content starts at x=4 in frame space
+  test "quad TL centered with trim: pivot=(0.5*fW+fX, 0.5*fH+fY)=(32,48)":
+    ## arm: fW=72, fH=100, fX=-4, fY=-2 → pivX=32, pivY=48 → TL=(-32,-48)
     let s = findSub(parseAtlas(baseAtlas), "arm")
-    check approxEqV(s.quadVerts[0], vec2(4, 2))
+    check approxEqV(s.quadVerts[0], vec2(-32, -48))
 
-  test "quad TR = (−frameX + visW, −frameY)":
+  test "quad TR = TL + (visW, 0)":
+    ## arm: TL=(-32,-48), visW=64 → TR=(32,-48)
     let s = findSub(parseAtlas(baseAtlas), "arm")
-    check approxEqV(s.quadVerts[1], vec2(4 + 64, 2))
+    check approxEqV(s.quadVerts[1], vec2(32, -48))
 
-  test "quad BL = (−frameX, −frameY + visH)":
+  test "quad BL = TL + (0, visH)":
+    ## arm: TL=(-32,-48), visH=96 → BL=(-32,48)
     let s = findSub(parseAtlas(baseAtlas), "arm")
-    check approxEqV(s.quadVerts[3], vec2(4, 2 + 96))
+    check approxEqV(s.quadVerts[3], vec2(-32, 48))
 
   test "UV TL: x=128, y=0 → (128/512, 0/256)":
     let s = findSub(parseAtlas(baseAtlas), "arm")
@@ -167,10 +171,12 @@ suite "parseAtlas — rotated, no trim":
     check s.frameWidth  == 80
     check s.frameHeight == 48
 
-  test "quad spans original sprite dimensions (visW=h=80, visH=w=48)":
+  test "quad centered on frame: no trim → TL=(−visW/2,−visH/2)":
+    ## leg_r: rotated → visW=80, visH=48, fW=80, fH=48, fX=fY=0 → pivot=(40,24)
+    ## TL=(-40,-24), BR=(40,24)
     let s = findSub(parseAtlas(baseAtlas), "leg_r")
-    check approxEqV(s.quadVerts[0], vec2(0, 0))   ## TL
-    check approxEqV(s.quadVerts[2], vec2(80, 48))  ## BR
+    check approxEqV(s.quadVerts[0], vec2(-40, -24))  ## TL
+    check approxEqV(s.quadVerts[2], vec2(40, 24))    ## BR
 
   test "UV TL: sprite TL → atlas BL (u0, v1)":
     ## leg_r: x=0, y=64, w=48, h=80 → u0=0/512, v0=64/256, u1=48/512, v1=144/256
@@ -205,11 +211,12 @@ suite "parseAtlas — rotated, with trim":
     check s.frameWidth  == 54
     check s.frameHeight == 100
 
-  test "quad TL at (−frameX, −frameY) = (3, 1)":
+  test "quad TL centered with trim: head pivot=(0.5*54+(-3), 0.5*100+(-1))=(24,49)":
+    ## head: rotated, fW=54, fH=100, fX=-3, fY=-1 → pivX=24, pivY=49 → TL=(-24,-49)
     let s = findSub(parseAtlas(baseAtlas), "head")
-    check approxEqV(s.quadVerts[0], vec2(3, 1))
+    check approxEqV(s.quadVerts[0], vec2(-24, -49))
 
-  test "quad BR at (3+visW, 1+visH): rotated → visW=h=48, visH=w=96":
-    ## visW = atlas h = 48, visH = atlas w = 96
+  test "quad BR: rotated → visW=h=48, visH=w=96 → BR=(24, 47)":
+    ## TL=(-24,-49), visW=48, visH=96 → BR=(24,47)
     let s = findSub(parseAtlas(baseAtlas), "head")
-    check approxEqV(s.quadVerts[2], vec2(3 + 48, 1 + 96))
+    check approxEqV(s.quadVerts[2], vec2(24, 47))
